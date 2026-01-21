@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { 
-  BarChart3, TrendingUp, Clock, Target, Trophy, BookOpen, 
-  Timer, Layers, ChevronDown
+  BarChart3, Clock, BookOpen, 
+  Timer, Layers
 } from "lucide-react";
+import { subDays, eachDayOfInterval, format, differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { FlashcardStats } from "@/components/metrics/FlashcardStats";
+import { DateRangeFilter, DateRange } from "@/components/metrics/DateRangeFilter";
 
 interface StudySession {
   fecha: string;
@@ -22,33 +24,31 @@ interface SubjectStudyData {
   sessions_count: number;
 }
 
+const defaultDateRange: DateRange = {
+  from: subDays(new Date(), 30),
+  to: new Date(),
+  label: "Últimos 30 días",
+};
+
 export default function Metrics() {
   const { user } = useAuth();
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [subjects, setSubjects] = useState<{ id: string; nombre: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"general" | "flashcards">("general");
+  const [dateRange, setDateRange] = useState<DateRange>(defaultDateRange);
 
-  useEffect(() => {
-    if (user) {
-      fetchData();
-    }
-  }, [user]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
 
     try {
-      // Fetch study sessions from last 30 days
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
       const { data: sessionData } = await supabase
         .from("study_sessions")
         .select("fecha, duracion_segundos, tipo, subject_id")
         .eq("user_id", user.id)
-        .gte("fecha", thirtyDaysAgo.toISOString().split('T')[0])
+        .gte("fecha", dateRange.from.toISOString().split('T')[0])
+        .lte("fecha", dateRange.to.toISOString().split('T')[0])
         .order("fecha", { ascending: true });
 
       const { data: subjectData } = await supabase
@@ -62,34 +62,97 @@ export default function Metrics() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, dateRange]);
 
-  // Calculate weekly data
-  const getWeeklyData = () => {
-    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-    const today = new Date();
-    const weekData: { day: string; date: string; hours: number; pomodoros: number; flashcards: number }[] = [];
-
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const daySessions = sessions.filter(s => s.fecha === dateStr);
-      const totalSeconds = daySessions.reduce((acc, s) => acc + s.duracion_segundos, 0);
-      const pomodoroCount = daySessions.filter(s => s.tipo === 'pomodoro').length;
-      const flashcardSessions = daySessions.filter(s => s.tipo === 'flashcard').length;
-
-      weekData.push({
-        day: days[date.getDay()],
-        date: dateStr,
-        hours: totalSeconds / 3600,
-        pomodoros: pomodoroCount,
-        flashcards: flashcardSessions,
-      });
+  useEffect(() => {
+    if (user) {
+      fetchData();
     }
+  }, [user, fetchData]);
 
-    return weekData;
+  // Calculate chart data based on date range
+  const getChartData = () => {
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const totalDays = differenceInDays(dateRange.to, dateRange.from) + 1;
+    
+    // If range is <= 14 days, show daily data
+    // If range is <= 90 days, show weekly aggregates
+    // Otherwise, show monthly aggregates
+    
+    if (totalDays <= 14) {
+      // Daily view
+      const allDays = eachDayOfInterval({ start: dateRange.from, end: dateRange.to });
+      return allDays.map(date => {
+        const dateStr = format(date, 'yyyy-MM-dd');
+        const daySessions = sessions.filter(s => s.fecha === dateStr);
+        const totalSeconds = daySessions.reduce((acc, s) => acc + s.duracion_segundos, 0);
+        const pomodoroCount = daySessions.filter(s => s.tipo === 'pomodoro').length;
+        const flashcardSessions = daySessions.filter(s => s.tipo === 'flashcard').length;
+
+        return {
+          label: days[date.getDay()],
+          sublabel: format(date, 'dd/MM'),
+          date: dateStr,
+          hours: totalSeconds / 3600,
+          pomodoros: pomodoroCount,
+          flashcards: flashcardSessions,
+        };
+      });
+    } else if (totalDays <= 90) {
+      // Weekly view - aggregate by week
+      const weeks: { [key: string]: { hours: number; pomodoros: number; flashcards: number; startDate: Date } } = {};
+      
+      sessions.forEach(session => {
+        const sessionDate = new Date(session.fecha);
+        const weekStart = new Date(sessionDate);
+        weekStart.setDate(sessionDate.getDate() - sessionDate.getDay());
+        const weekKey = format(weekStart, 'yyyy-MM-dd');
+        
+        if (!weeks[weekKey]) {
+          weeks[weekKey] = { hours: 0, pomodoros: 0, flashcards: 0, startDate: weekStart };
+        }
+        weeks[weekKey].hours += session.duracion_segundos / 3600;
+        if (session.tipo === 'pomodoro') weeks[weekKey].pomodoros++;
+        if (session.tipo === 'flashcard') weeks[weekKey].flashcards++;
+      });
+
+      return Object.entries(weeks)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, data]) => ({
+          label: `Sem`,
+          sublabel: format(data.startDate, 'dd/MM'),
+          date: key,
+          hours: data.hours,
+          pomodoros: data.pomodoros,
+          flashcards: data.flashcards,
+        }));
+    } else {
+      // Monthly view
+      const months: { [key: string]: { hours: number; pomodoros: number; flashcards: number; date: Date } } = {};
+      
+      sessions.forEach(session => {
+        const sessionDate = new Date(session.fecha);
+        const monthKey = format(sessionDate, 'yyyy-MM');
+        
+        if (!months[monthKey]) {
+          months[monthKey] = { hours: 0, pomodoros: 0, flashcards: 0, date: sessionDate };
+        }
+        months[monthKey].hours += session.duracion_segundos / 3600;
+        if (session.tipo === 'pomodoro') months[monthKey].pomodoros++;
+        if (session.tipo === 'flashcard') months[monthKey].flashcards++;
+      });
+
+      return Object.entries(months)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, data]) => ({
+          label: format(data.date, 'MMM'),
+          sublabel: format(data.date, 'yyyy'),
+          date: key,
+          hours: data.hours,
+          pomodoros: data.pomodoros,
+          flashcards: data.flashcards,
+        }));
+    }
   };
 
   // Calculate subject progress
@@ -116,34 +179,46 @@ export default function Metrics() {
       .slice(0, 5);
   };
 
-  const weeklyData = getWeeklyData();
+  const chartData = getChartData();
   const subjectProgress = getSubjectProgress();
-  const maxHours = Math.max(...weeklyData.map(d => d.hours), 0.1);
-  const totalHours = weeklyData.reduce((acc, d) => acc + d.hours, 0);
-  const totalPomodoros = weeklyData.reduce((acc, d) => acc + d.pomodoros, 0);
-  const totalFlashcardSessions = weeklyData.reduce((acc, d) => acc + d.flashcards, 0);
+  const maxHours = Math.max(...chartData.map(d => d.hours), 0.1);
+  const totalHours = sessions.reduce((acc, s) => acc + s.duracion_segundos / 3600, 0);
+  const totalPomodoros = sessions.filter(s => s.tipo === 'pomodoro').length;
+  const totalFlashcardSessions = sessions.filter(s => s.tipo === 'flashcard').length;
   const studiedSubjects = new Set(sessions.map(s => s.subject_id).filter(Boolean)).size;
+  const totalDays = differenceInDays(dateRange.to, dateRange.from) + 1;
 
   const formatHours = (hours: number) => {
     if (hours < 1) return `${Math.round(hours * 60)}m`;
     return `${hours.toFixed(1)}h`;
   };
 
+  const getChartTitle = () => {
+    if (totalDays <= 14) return "Horas de Estudio por Día";
+    if (totalDays <= 90) return "Horas de Estudio por Semana";
+    return "Horas de Estudio por Mes";
+  };
+
   return (
     <div className="p-4 lg:p-8 space-y-6">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl lg:text-3xl font-bold gradient-text">
-            Métricas y Rendimiento
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Analiza tu progreso y optimiza tu estudio
-          </p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h1 className="font-display text-2xl lg:text-3xl font-bold gradient-text">
+              Métricas y Rendimiento
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Analiza tu progreso y optimiza tu estudio
+            </p>
+          </div>
+          
+          {/* Date Range Filter */}
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </div>
         
         {/* Tab Selector */}
-        <div className="flex bg-secondary rounded-xl p-1">
+        <div className="flex bg-secondary rounded-xl p-1 w-fit">
           <button
             onClick={() => setActiveTab("general")}
             className={cn(
@@ -181,9 +256,9 @@ export default function Metrics() {
                   <Clock className="w-5 h-5 text-neon-cyan" />
                 </div>
               </div>
-              <p className="text-2xl font-display font-bold text-neon-cyan">{formatHours(totalHours)}</p>
-              <p className="text-xs text-muted-foreground">Horas esta semana</p>
-            </div>
+            <p className="text-2xl font-display font-bold text-neon-cyan">{formatHours(totalHours)}</p>
+            <p className="text-xs text-muted-foreground">Horas totales</p>
+          </div>
             <div className="card-gamer rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-neon-gold/20 flex items-center justify-center">
@@ -216,9 +291,9 @@ export default function Metrics() {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* Weekly Chart */}
             <div className="lg:col-span-2 card-gamer rounded-xl p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="font-display font-semibold text-lg">Horas de Estudio Semanal</h2>
-                <BarChart3 className="w-5 h-5 text-muted-foreground" />
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display font-semibold text-lg">{getChartTitle()}</h2>
+              <BarChart3 className="w-5 h-5 text-muted-foreground" />
               </div>
               
               {loading ? (
@@ -226,37 +301,38 @@ export default function Metrics() {
                   <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : (
-                <div className="flex items-end justify-between gap-2 h-48">
-                  {weeklyData.map((day) => (
-                    <div key={day.date} className="flex-1 flex flex-col items-center gap-2">
-                      <div
-                        className={cn(
-                          "w-full rounded-t-lg transition-all duration-500 relative group",
-                          day.hours > 0 ? "" : "bg-secondary/30"
-                        )}
-                        style={{
-                          height: `${Math.max((day.hours / maxHours) * 100, 4)}%`,
-                          background: day.hours > 0 
-                            ? `linear-gradient(180deg, hsl(var(--neon-cyan)) 0%, hsl(var(--neon-purple)) 100%)`
-                            : undefined,
-                        }}
-                      >
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-card px-2 py-1 rounded text-xs whitespace-nowrap border border-border">
-                          {formatHours(day.hours)}
-                        </div>
+              <div className="flex items-end justify-between gap-1 h-48 overflow-x-auto pb-2">
+                {chartData.map((item, idx) => (
+                  <div key={`${item.date}-${idx}`} className="flex-1 min-w-[28px] max-w-[60px] flex flex-col items-center gap-1">
+                    <div
+                      className={cn(
+                        "w-full rounded-t-lg transition-all duration-500 relative group",
+                        item.hours > 0 ? "" : "bg-secondary/30"
+                      )}
+                      style={{
+                        height: `${Math.max((item.hours / maxHours) * 100, 4)}%`,
+                        background: item.hours > 0 
+                          ? `linear-gradient(180deg, hsl(var(--neon-cyan)) 0%, hsl(var(--neon-purple)) 100%)`
+                          : undefined,
+                      }}
+                    >
+                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-card px-2 py-1 rounded text-xs whitespace-nowrap border border-border z-10">
+                        {formatHours(item.hours)}
                       </div>
-                      <span className="text-xs text-muted-foreground">{day.day}</span>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-6 pt-6 border-t border-border">
-                <p className="text-sm text-muted-foreground mb-2">Promedio diario</p>
-                <p className="text-2xl font-display font-bold gradient-text">
-                  {formatHours(totalHours / 7)}
-                </p>
+                    <span className="text-[10px] text-muted-foreground leading-tight">{item.label}</span>
+                    <span className="text-[9px] text-muted-foreground/70 leading-tight">{item.sublabel}</span>
+                  </div>
+                ))}
               </div>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-border">
+              <p className="text-sm text-muted-foreground mb-2">Promedio diario</p>
+              <p className="text-2xl font-display font-bold gradient-text">
+                {formatHours(totalHours / totalDays)}
+              </p>
+            </div>
             </div>
 
             {/* Subject Progress */}
