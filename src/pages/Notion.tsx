@@ -43,8 +43,11 @@ export default function Notion() {
   const [editorContent, setEditorContent] = useState<OutputData | null>(null);
   const [localTitle, setLocalTitle] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<NotionTemplate>(notionTemplates[0]);
+
+  // Keep latest content out of React render loop to avoid Editor.js cursor jumps
+  const editorContentRef = useRef<OutputData | null>(null);
+  const contentStateSyncTimeoutRef = useRef<number | null>(null);
   
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef<string>("");
 
   // Fetch subjects
@@ -79,16 +82,24 @@ export default function Notion() {
     return matchesSearch && (selectedSubjectId ? matchesSubject : matchesYear || !selectedYear);
   });
 
-  // Track content changes without auto-save
+  // Track content changes without re-rendering on every keystroke
   const handleContentUpdate = useCallback((content: OutputData) => {
     if (!activeDocument) return;
-    setEditorContent(content);
+    editorContentRef.current = content;
+
+    // Sync to state (for PDF export) but debounced to keep typing smooth
+    if (contentStateSyncTimeoutRef.current) {
+      window.clearTimeout(contentStateSyncTimeoutRef.current);
+    }
+    contentStateSyncTimeoutRef.current = window.setTimeout(() => {
+      setEditorContent(editorContentRef.current);
+    }, 600);
   }, [activeDocument]);
 
   // Check if there are unsaved changes (content or title)
   const hasUnsavedChanges = useCallback(() => {
     if (!activeDocument) return false;
-    const currentContent = JSON.stringify(editorContent);
+    const currentContent = JSON.stringify(editorContentRef.current ?? editorContent);
     const contentChanged = currentContent !== lastSavedContentRef.current;
     const titleChanged = localTitle !== activeDocument.titulo;
     return contentChanged || titleChanged;
@@ -102,15 +113,16 @@ export default function Notion() {
     try {
       const updates: { contenido?: OutputData; titulo?: string } = {};
       
-      if (editorContent) {
-        updates.contenido = editorContent;
+      const contentToSave = editorContentRef.current ?? editorContent;
+      if (contentToSave) {
+        updates.contenido = contentToSave;
       }
       if (localTitle !== activeDocument.titulo) {
         updates.titulo = localTitle;
       }
       
       await updateDocument(activeDocument.id, updates);
-      lastSavedContentRef.current = JSON.stringify(editorContent);
+      lastSavedContentRef.current = JSON.stringify(contentToSave);
       setActiveDocument(prev => prev ? { ...prev, titulo: localTitle } : null);
       toast.success("Apunte guardado");
     } catch (error) {
@@ -119,6 +131,24 @@ export default function Notion() {
       setIsSaving(false);
     }
   }, [activeDocument, editorContent, localTitle, updateDocument]);
+
+  // Notion-style save shortcut: Cmd/Ctrl + S
+  useEffect(() => {
+    if (!activeDocument) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isSave = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s";
+      if (!isSave) return;
+
+      e.preventDefault();
+      if (!isSaving && hasUnsavedChanges()) {
+        handleManualSave();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeDocument, handleManualSave, hasUnsavedChanges, isSaving]);
 
   // Update local title only (no DB save on each keystroke)
   const handleTitleChange = useCallback((title: string) => {
@@ -180,6 +210,7 @@ export default function Notion() {
     const content = doc.contenido as OutputData;
     lastSavedContentRef.current = JSON.stringify(content);
     setEditorContent(content);
+    editorContentRef.current = content;
     setLocalTitle(doc.titulo);
     setActiveDocument(doc);
   };
@@ -191,6 +222,7 @@ export default function Notion() {
     }
     setActiveDocument(null);
     setEditorContent(null);
+    editorContentRef.current = null;
     setLocalTitle("");
     refetch();
   };
@@ -230,12 +262,12 @@ export default function Notion() {
                 placeholder="Sin título"
               />
               
-              {isSaving ? (
+               {isSaving ? (
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   Guardando...
                 </span>
-              ) : hasUnsavedChanges() && (
+               ) : hasUnsavedChanges() && (
                 <span className="text-xs text-neon-gold">Sin guardar</span>
               )}
             </div>
@@ -287,6 +319,7 @@ export default function Notion() {
           <EditorJSComponent
             content={editorContent}
             onUpdate={handleContentUpdate}
+            documentId={activeDocument.id}
           />
         </div>
         

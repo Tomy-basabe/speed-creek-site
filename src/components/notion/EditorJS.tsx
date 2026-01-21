@@ -19,17 +19,22 @@ interface EditorJSComponentProps {
   onUpdate: (content: OutputData) => void;
   placeholder?: string;
   readOnly?: boolean;
+  /** Used to force-load content only when switching documents (prevents cursor jumps while typing). */
+  documentId?: string;
 }
 
 export function EditorJSComponent({ 
   content, 
   onUpdate, 
   placeholder = "Escribe '/' para ver comandos o comienza a escribir...",
-  readOnly = false
+  readOnly = false,
+  documentId
 }: EditorJSComponentProps) {
   const editorRef = useRef<EditorJS | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
   const isReady = useRef(false);
+  const initialContentRef = useRef<OutputData | null>(content);
+  const lastLoadedDocumentIdRef = useRef<string | undefined>(documentId);
 
   const initEditor = useCallback(async () => {
     if (!holderRef.current || editorRef.current) return;
@@ -38,7 +43,8 @@ export function EditorJSComponent({
       holder: holderRef.current,
       placeholder,
       readOnly,
-      data: content || undefined,
+      // Important: only set initial data once; subsequent edits must not re-render from React state.
+      data: initialContentRef.current || undefined,
       autofocus: true,
       tools: {
         header: {
@@ -165,7 +171,7 @@ export function EditorJSComponent({
     });
 
     editorRef.current = editor;
-  }, [content, placeholder, readOnly, onUpdate]);
+  }, [placeholder, readOnly, onUpdate]);
 
   useEffect(() => {
     initEditor();
@@ -179,28 +185,28 @@ export function EditorJSComponent({
     };
   }, [initEditor]);
 
-  // Handle content updates from parent
+  // Only load content when switching documents (prevents cursor jumping while typing)
   useEffect(() => {
-    const updateContent = async () => {
-      if (editorRef.current && isReady.current && content) {
-        try {
-          await editorRef.current.isReady;
-          // Only render if content is significantly different
-          const currentData = await editorRef.current.save();
-          if (JSON.stringify(currentData) !== JSON.stringify(content)) {
-            await editorRef.current.render(content);
-          }
-        } catch (error) {
-          console.error("Error updating editor content:", error);
-        }
+    const shouldReload = documentId && documentId !== lastLoadedDocumentIdRef.current;
+    if (!shouldReload) return;
+
+    lastLoadedDocumentIdRef.current = documentId;
+    initialContentRef.current = content;
+
+    const load = async () => {
+      if (!editorRef.current || !isReady.current) return;
+      if (!content) return;
+
+      try {
+        await editorRef.current.isReady;
+        await editorRef.current.render(content);
+      } catch (error) {
+        console.error("Error loading editor content:", error);
       }
     };
-    
-    // Don't update on initial mount, only on subsequent content changes
-    if (isReady.current) {
-      updateContent();
-    }
-  }, [content]);
+
+    load();
+  }, [documentId, content]);
 
   return (
     <>
