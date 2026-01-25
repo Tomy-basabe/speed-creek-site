@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronUp, Check, X } from "lucide-react";
 
@@ -29,10 +29,29 @@ interface GradeInputProps {
 
 function GradeInput({ label, value, onChange, disabled, isEnabled, disabledReason }: GradeInputProps) {
   const [inputValue, setInputValue] = useState(value?.toString() ?? "");
+  const debounceRef = useRef<number | null>(null);
   
   useEffect(() => {
     setInputValue(value?.toString() ?? "");
   }, [value]);
+
+  // Auto-save (debounced) so users don't need to blur the input
+  useEffect(() => {
+    if (disabled || !isEnabled) return;
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+
+    debounceRef.current = window.setTimeout(() => {
+      const trimmed = inputValue.trim();
+      const numValue = trimmed === "" ? null : parseFloat(trimmed);
+      if (numValue !== null && (Number.isNaN(numValue) || numValue < 0 || numValue > 100)) return;
+      onChange(numValue);
+    }, 600);
+
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue, disabled, isEnabled]);
 
   const handleSave = () => {
     const numValue = inputValue === "" ? null : parseFloat(inputValue);
