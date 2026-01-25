@@ -503,9 +503,11 @@ export function useSubjects() {
       }
 
       await fetchData();
+      toast.success("Notas guardadas");
     } catch (error) {
       console.error("Error updating partial grades:", error);
       toast.error("Error al actualizar las notas parciales");
+      throw error;
     }
   };
 

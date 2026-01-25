@@ -85,6 +85,17 @@ export function SubjectStatusModal({
     }
   };
 
+  const handlePartialGradesUpdate = async (newGrades: PartialGrades) => {
+    if (!onUpdatePartialGrades) return;
+    setPartialGrades(newGrades);
+    setLoading(true);
+    try {
+      await onUpdatePartialGrades(subject.id, newGrades);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!onDelete) return;
     setLoading(true);
@@ -179,10 +190,7 @@ export function SubjectStatusModal({
             {onUpdatePartialGrades && (
               <PartialGradesSection
                 grades={partialGrades}
-                onUpdate={(newGrades) => {
-                  setPartialGrades(newGrades);
-                  onUpdatePartialGrades(subject.id, newGrades);
-                }}
+                onUpdate={handlePartialGradesUpdate}
                 disabled={loading}
               />
             )}
