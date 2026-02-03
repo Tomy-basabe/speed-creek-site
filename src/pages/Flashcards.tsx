@@ -89,10 +89,12 @@ export default function Flashcards() {
   };
 
   const fetchDecks = async () => {
+    if (!user) return;
     setLoading(true);
     const { data, error } = await supabase
       .from("flashcard_decks")
       .select("*, subjects(nombre, codigo, año)")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     
     if (!error && data) {

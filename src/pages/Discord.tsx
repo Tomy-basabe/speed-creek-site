@@ -46,6 +46,7 @@ export default function Discord() {
           }}
           onCreateChannel={discord.createChannel}
           onDeleteChannel={discord.deleteChannel}
+          onInviteUser={discord.inviteUser}
           inVoiceChannel={discord.inVoiceChannel}
           currentVoiceChannel={discord.inVoiceChannel ? discord.currentChannel : null}
         />

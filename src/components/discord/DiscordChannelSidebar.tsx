@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InviteFriendsModal } from "./InviteFriendsModal";
 
 interface DiscordChannelSidebarProps {
   server: DiscordServer;
@@ -35,6 +36,7 @@ interface DiscordChannelSidebarProps {
   onSelectChannel: (channel: DiscordChannel) => void;
   onCreateChannel: (name: string, type: "text" | "voice") => Promise<any>;
   onDeleteChannel: (channelId: string) => Promise<void>;
+  onInviteUser: (userId: string) => Promise<void>;
   inVoiceChannel: boolean;
   currentVoiceChannel: DiscordChannel | null;
 }
@@ -49,11 +51,13 @@ export function DiscordChannelSidebar({
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
+  onInviteUser,
   inVoiceChannel,
   currentVoiceChannel,
 }: DiscordChannelSidebarProps) {
   const [showCreateText, setShowCreateText] = useState(false);
   const [showCreateVoice, setShowCreateVoice] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [channelName, setChannelName] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -82,6 +86,8 @@ export function DiscordChannelSidebar({
     return voiceParticipants.filter((p) => p.channel_id === channelId);
   };
 
+  const existingMemberIds = members.map((m) => m.user_id);
+
   return (
     <div className="w-60 bg-[#2b2d31] flex flex-col">
       {/* Server header */}
@@ -93,7 +99,10 @@ export function DiscordChannelSidebar({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56 bg-[#111214] border-none text-[#b5bac1]">
-          <DropdownMenuItem className="hover:bg-[#5865f2] hover:text-white cursor-pointer">
+          <DropdownMenuItem 
+            className="hover:bg-[#5865f2] hover:text-white cursor-pointer"
+            onClick={() => setShowInviteModal(true)}
+          >
             <Users className="w-4 h-4 mr-2" />
             Invitar personas
           </DropdownMenuItem>
@@ -103,6 +112,16 @@ export function DiscordChannelSidebar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Invite Friends Modal */}
+      <InviteFriendsModal
+        open={showInviteModal}
+        onOpenChange={setShowInviteModal}
+        serverId={server.id}
+        serverName={server.name}
+        existingMemberIds={existingMemberIds}
+        onInviteUser={onInviteUser}
+      />
 
       {/* Channels list */}
       <div className="flex-1 overflow-y-auto px-2 py-4">

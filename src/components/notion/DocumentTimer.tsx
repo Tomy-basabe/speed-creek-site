@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, Clock, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,24 @@ export function DocumentTimer({ onSaveTime, autoStart = true }: DocumentTimerPro
   const [savedSeconds, setSavedSeconds] = useState(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveRef = useRef<number>(0);
+  
+  // Use refs to always have current values available for cleanup
+  const secondsRef = useRef(0);
+  const savedSecondsRef = useRef(0);
+  const onSaveTimeRef = useRef(onSaveTime);
+  
+  // Keep refs in sync
+  useEffect(() => {
+    secondsRef.current = seconds;
+  }, [seconds]);
+  
+  useEffect(() => {
+    savedSecondsRef.current = savedSeconds;
+  }, [savedSeconds]);
+  
+  useEffect(() => {
+    onSaveTimeRef.current = onSaveTime;
+  }, [onSaveTime]);
 
   useEffect(() => {
     if (isRunning) {
@@ -42,12 +60,12 @@ export function DocumentTimer({ onSaveTime, autoStart = true }: DocumentTimerPro
     }
   }, [seconds, savedSeconds, onSaveTime]);
 
-  // Save on unmount
+  // Save on unmount - using refs to get current values
   useEffect(() => {
     return () => {
-      const unsavedSeconds = seconds - savedSeconds;
+      const unsavedSeconds = secondsRef.current - savedSecondsRef.current;
       if (unsavedSeconds > 0) {
-        onSaveTime(unsavedSeconds);
+        onSaveTimeRef.current(unsavedSeconds);
       }
     };
   }, []);

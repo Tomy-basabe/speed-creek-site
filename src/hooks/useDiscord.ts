@@ -437,8 +437,24 @@ export function useDiscord() {
       setCurrentChannel(channel);
       setInVoiceChannel(true);
       
-      // Setup signaling
+      // Setup signaling and connect to existing participants
       await setupSignaling(channel.id, stream);
+      
+      // Get existing participants and create offers to each
+      const { data: existingParticipants } = await supabase
+        .from("discord_voice_participants")
+        .select("user_id")
+        .eq("channel_id", channel.id)
+        .neq("user_id", user.id);
+      
+      if (existingParticipants && existingParticipants.length > 0) {
+        // Wait a bit for signaling channel to be ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        for (const participant of existingParticipants) {
+          await createOffer(participant.user_id, stream);
+        }
+      }
       
     } catch (error) {
       console.error("Error joining voice channel:", error);
