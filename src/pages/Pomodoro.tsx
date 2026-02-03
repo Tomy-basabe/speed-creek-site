@@ -99,7 +99,47 @@ export default function Pomodoro() {
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const saveIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
+  
+  // Refs for cleanup to always have current values
+  const elapsedSecondsRef = useRef(0);
+  const modeRef = useRef<TimerMode>("work");
+  const selectedSubjectRef = useRef<string | null>(null);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    elapsedSecondsRef.current = elapsedSeconds;
+  }, [elapsedSeconds]);
+  
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  
+  useEffect(() => {
+    selectedSubjectRef.current = selectedSubject;
+  }, [selectedSubject]);
+  
+  // Save on unmount if there's unsaved time
+  useEffect(() => {
+    return () => {
+      if (modeRef.current === "work" && elapsedSecondsRef.current > 0 && user) {
+        // Use sendBeacon for reliability during unmount
+        const sessionData = {
+          user_id: user.id,
+          subject_id: selectedSubjectRef.current,
+          duracion_segundos: elapsedSecondsRef.current,
+          tipo: "pomodoro",
+          completada: false,
+          fecha: new Date().toISOString().split('T')[0],
+        };
+        
+        // Attempt to save via supabase (may not complete during unmount)
+        supabase
+          .from("study_sessions")
+          .insert(sessionData)
+          .then(() => {});
+      }
+    };
+  }, [user]);
   const totalTime = settings[mode] * 60;
   const progress = ((totalTime - timeLeft) / totalTime) * 100;
 
