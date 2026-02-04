@@ -103,6 +103,7 @@ export function useDiscord() {
   const audioContext = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null); // Keep reference for signaling handlers
 
   // Fetch user's servers
   const fetchServers = useCallback(async () => {
@@ -418,11 +419,21 @@ export function useDiscord() {
       });
       
       setLocalStream(stream);
+      localStreamRef.current = stream; // Store in ref for signaling handlers
       setIsAudioEnabled(true);
       setIsVideoEnabled(false);
       
       // Setup voice activity detection
       setupVoiceActivityDetection(stream);
+      
+      // Get existing participants BEFORE inserting ourselves
+      const { data: existingParticipants } = await supabase
+        .from("discord_voice_participants")
+        .select("user_id")
+        .eq("channel_id", channel.id)
+        .neq("user_id", user.id);
+      
+      console.log("[Discord] Existing participants:", existingParticipants?.length || 0);
       
       // Add to participants
       await supabase
@@ -437,21 +448,17 @@ export function useDiscord() {
       setCurrentChannel(channel);
       setInVoiceChannel(true);
       
-      // Setup signaling and connect to existing participants
+      // Setup signaling channel
       await setupSignaling(channel.id, stream);
       
-      // Get existing participants and create offers to each
-      const { data: existingParticipants } = await supabase
-        .from("discord_voice_participants")
-        .select("user_id")
-        .eq("channel_id", channel.id)
-        .neq("user_id", user.id);
+      // Wait for signaling channel to be fully subscribed
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
+      // Create offers to all existing participants
       if (existingParticipants && existingParticipants.length > 0) {
-        // Wait a bit for signaling channel to be ready
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
+        console.log("[Discord] Creating offers to existing participants");
         for (const participant of existingParticipants) {
+          console.log("[Discord] Creating offer to:", participant.user_id);
           await createOffer(participant.user_id, stream);
         }
       }
@@ -499,6 +506,12 @@ export function useDiscord() {
   const setupSignaling = async (channelId: string, stream: MediaStream) => {
     if (!user) return;
     
+    // Clean up existing channel first
+    if (signalingChannel.current) {
+      await supabase.removeChannel(signalingChannel.current);
+      signalingChannel.current = null;
+    }
+    
     const channel = supabase.channel(`voice:${channelId}`, {
       config: {
         broadcast: { self: false },
@@ -511,8 +524,17 @@ export function useDiscord() {
         const { type, from, to, data } = payload;
         if (to && to !== user.id) return;
         
+        // Use ref to get current stream (important for closures)
+        const currentStream = localStreamRef.current;
+        if (!currentStream) {
+          console.warn("[Discord] No local stream available for signaling");
+          return;
+        }
+        
+        console.log("[Discord] Received signal:", type, "from:", from);
+        
         if (type === "offer") {
-          await handleOffer(from, data, stream);
+          await handleOffer(from, data, currentStream);
         } else if (type === "answer") {
           await handleAnswer(from, data);
         } else if (type === "ice-candidate") {
@@ -520,11 +542,14 @@ export function useDiscord() {
         }
       })
       .on("presence", { event: "join" }, async ({ key }) => {
-        if (key !== user.id) {
-          await createOffer(key, stream);
+        console.log("[Discord] User joined presence:", key);
+        if (key !== user.id && localStreamRef.current) {
+          console.log("[Discord] Creating offer to new user:", key);
+          await createOffer(key, localStreamRef.current);
         }
       })
       .on("presence", { event: "leave" }, ({ key }) => {
+        console.log("[Discord] User left:", key);
         const pc = peerConnections.current.get(key);
         if (pc) {
           pc.close();
@@ -537,6 +562,7 @@ export function useDiscord() {
         }
       })
       .subscribe(async (status) => {
+        console.log("[Discord] Signaling channel status:", status);
         if (status === "SUBSCRIBED") {
           await channel.track({ user_id: user.id });
         }
@@ -547,23 +573,38 @@ export function useDiscord() {
 
   // WebRTC handlers
   const createPeerConnection = (peerId: string, stream: MediaStream) => {
+    // Check if connection already exists
+    const existingPc = peerConnections.current.get(peerId);
+    if (existingPc) {
+      console.log("[Discord] Closing existing connection to:", peerId);
+      existingPc.close();
+      peerConnections.current.delete(peerId);
+    }
+    
+    console.log("[Discord] Creating peer connection to:", peerId);
     const pc = new RTCPeerConnection(ICE_SERVERS);
     
+    // Add all local tracks to the peer connection
     stream.getTracks().forEach(track => {
+      console.log("[Discord] Adding track:", track.kind, "to peer:", peerId);
       pc.addTrack(track, stream);
     });
     
     pc.ontrack = (event) => {
+      console.log("[Discord] Received track from:", peerId, event.track.kind);
       const [remoteStream] = event.streams;
-      setRemoteStreams(prev => {
-        const updated = new Map(prev);
-        updated.set(peerId, remoteStream);
-        return updated;
-      });
+      if (remoteStream) {
+        setRemoteStreams(prev => {
+          const updated = new Map(prev);
+          updated.set(peerId, remoteStream);
+          return updated;
+        });
+      }
     };
     
     pc.onicecandidate = (event) => {
       if (event.candidate && signalingChannel.current) {
+        console.log("[Discord] Sending ICE candidate to:", peerId);
         signalingChannel.current.send({
           type: "broadcast",
           event: "signal",
@@ -575,6 +616,23 @@ export function useDiscord() {
           },
         });
       }
+    };
+    
+    pc.onconnectionstatechange = () => {
+      console.log("[Discord] Connection state with", peerId, ":", pc.connectionState);
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+        // Clean up failed connection
+        peerConnections.current.delete(peerId);
+        setRemoteStreams(prev => {
+          const updated = new Map(prev);
+          updated.delete(peerId);
+          return updated;
+        });
+      }
+    };
+    
+    pc.oniceconnectionstatechange = () => {
+      console.log("[Discord] ICE connection state with", peerId, ":", pc.iceConnectionState);
     };
     
     peerConnections.current.set(peerId, pc);

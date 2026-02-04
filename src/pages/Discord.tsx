@@ -6,10 +6,14 @@ import { DiscordTextChannel } from "@/components/discord/DiscordTextChannel";
 import { DiscordVoiceChannel } from "@/components/discord/DiscordVoiceChannel";
 import { DiscordVoiceBar } from "@/components/discord/DiscordVoiceBar";
 import { cn } from "@/lib/utils";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function Discord() {
   const discord = useDiscord();
   const [showMembers, setShowMembers] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     <div className="h-screen flex bg-[#313338] overflow-hidden">
@@ -21,35 +25,67 @@ export default function Discord() {
         onCreateServer={discord.createServer}
       />
 
-      {/* Channel sidebar */}
+      {/* Channel sidebar - collapsible */}
       {discord.currentServer && (
-        <DiscordChannelSidebar
-          server={discord.currentServer}
-          channels={discord.channels}
-          currentChannel={discord.currentChannel}
-          members={discord.members}
-          voiceParticipants={discord.voiceParticipants}
-          speakingUsers={discord.speakingUsers}
-          onSelectChannel={(channel) => {
-            if (channel.type === "voice") {
-              if (discord.inVoiceChannel && discord.currentChannel?.id === channel.id) {
-                // Already in this channel
-                return;
+        <div className={cn(
+          "transition-all duration-300 relative",
+          sidebarCollapsed ? "w-0 overflow-hidden" : "w-60"
+        )}>
+          <DiscordChannelSidebar
+            server={discord.currentServer}
+            channels={discord.channels}
+            currentChannel={discord.currentChannel}
+            members={discord.members}
+            voiceParticipants={discord.voiceParticipants}
+            speakingUsers={discord.speakingUsers}
+            onSelectChannel={(channel) => {
+              if (channel.type === "voice") {
+                if (discord.inVoiceChannel && discord.currentChannel?.id === channel.id) {
+                  // Already in this channel
+                  return;
+                }
+                if (discord.inVoiceChannel) {
+                  discord.leaveVoiceChannel();
+                }
+                discord.joinVoiceChannel(channel);
+              } else {
+                discord.setCurrentChannel(channel);
               }
-              if (discord.inVoiceChannel) {
-                discord.leaveVoiceChannel();
-              }
-              discord.joinVoiceChannel(channel);
-            } else {
-              discord.setCurrentChannel(channel);
-            }
-          }}
-          onCreateChannel={discord.createChannel}
-          onDeleteChannel={discord.deleteChannel}
-          onInviteUser={discord.inviteUser}
-          inVoiceChannel={discord.inVoiceChannel}
-          currentVoiceChannel={discord.inVoiceChannel ? discord.currentChannel : null}
-        />
+            }}
+            onCreateChannel={discord.createChannel}
+            onDeleteChannel={discord.deleteChannel}
+            onInviteUser={discord.inviteUser}
+            inVoiceChannel={discord.inVoiceChannel}
+            currentVoiceChannel={discord.inVoiceChannel ? discord.currentChannel : null}
+          />
+        </div>
+      )}
+
+      {/* Sidebar toggle button */}
+      {discord.currentServer && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className={cn(
+                "absolute z-50 bg-[#2b2d31] hover:bg-[#35373c] text-[#b5bac1] hover:text-white border border-[#1f2023] rounded-full w-6 h-6 transition-all duration-300",
+                sidebarCollapsed ? "left-[72px]" : "left-[calc(72px+240px-12px)]",
+                "top-4"
+              )}
+            >
+              {sidebarCollapsed ? (
+                <ChevronRight className="w-4 h-4" />
+              ) : (
+                <ChevronLeft className="w-4 h-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {sidebarCollapsed ? "Mostrar canales" : "Ocultar canales"}
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {/* Main content area */}
