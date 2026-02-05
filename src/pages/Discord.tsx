@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDiscord } from "@/hooks/useDiscord";
+import { useAuth } from "@/contexts/AuthContext";
 import { DiscordServerList } from "@/components/discord/DiscordServerList";
 import { DiscordChannelSidebar } from "@/components/discord/DiscordChannelSidebar";
 import { DiscordTextChannel } from "@/components/discord/DiscordTextChannel";
@@ -12,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 export default function Discord() {
   const discord = useDiscord();
+  const { user } = useAuth();
   const [showMembers, setShowMembers] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -110,6 +112,7 @@ export default function Discord() {
               isVideoEnabled={discord.isVideoEnabled}
               isAudioEnabled={discord.isAudioEnabled}
               isScreenSharing={discord.isScreenSharing}
+              localUserId={user?.id ?? null}
             />
           )
         ) : discord.currentServer ? (
