@@ -1,6 +1,6 @@
 import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Mic, MicOff, Video, VideoOff, Monitor, User } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Monitor } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { DiscordChannel, DiscordVoiceParticipant } from "@/hooks/useDiscord";
 
@@ -13,6 +13,7 @@ interface DiscordVoiceChannelProps {
   isVideoEnabled: boolean;
   isAudioEnabled: boolean;
   isScreenSharing: boolean;
+  localUserId: string | null;
 }
 
 export function DiscordVoiceChannel({
@@ -24,6 +25,7 @@ export function DiscordVoiceChannel({
   isVideoEnabled,
   isAudioEnabled,
   isScreenSharing,
+  localUserId,
 }: DiscordVoiceChannelProps) {
   // Calculate grid layout based on number of participants
   const totalParticipants = participants.length;
@@ -40,15 +42,20 @@ export function DiscordVoiceChannel({
   return (
     <div className="flex-1 bg-[#1e1f22] p-4">
       <div className={cn("grid gap-4 h-full", getGridClass())}>
-        {participants.map((participant) => (
-          <VoiceTile
-            key={participant.id}
-            participant={participant}
-            stream={remoteStreams.get(participant.user_id) || (participant.user_id === participants[0]?.user_id ? localStream : null)}
-            isSpeaking={speakingUsers.has(participant.user_id)}
-            isLocal={participant.user_id === participants[0]?.user_id}
-          />
-        ))}
+        {participants.map((participant) => {
+          const isLocal = !!localUserId && participant.user_id === localUserId;
+          const stream = isLocal ? localStream : remoteStreams.get(participant.user_id) || null;
+
+          return (
+            <VoiceTile
+              key={participant.id}
+              participant={participant}
+              stream={stream}
+              isSpeaking={speakingUsers.has(participant.user_id)}
+              isLocal={isLocal}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -66,14 +73,16 @@ function VoiceTile({
   isLocal: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    if (!stream) return;
+    if (videoRef.current) videoRef.current.srcObject = stream;
+    if (audioRef.current) audioRef.current.srcObject = stream;
   }, [stream]);
 
   const hasVideo = stream && stream.getVideoTracks().length > 0 && participant.is_camera_on;
+  const hasAudio = !!(stream && stream.getAudioTracks().length > 0);
   const displayName = participant.profile?.nombre || participant.profile?.username || "Usuario";
 
   return (
@@ -96,6 +105,19 @@ function VoiceTile({
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-[#2b2d31]">
+          {/*
+            IMPORTANT: cuando no hay video, igual necesitamos un elemento que reproduzca el audio.
+            Si no, los usuarios nunca se escuchan (porque el <video> no se monta).
+          */}
+          {hasAudio && (
+            <audio
+              ref={audioRef}
+              autoPlay
+              playsInline
+              muted={isLocal}
+              className="hidden"
+            />
+          )}
           <Avatar className={cn(
             "w-24 h-24 transition-all",
             isSpeaking && "ring-4 ring-[#23a559]"
