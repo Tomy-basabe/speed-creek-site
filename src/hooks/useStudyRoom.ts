@@ -61,14 +61,14 @@ export function useStudyRoom() {
         .from("subjects")
         .select("id, nombre, codigo")
         .order("numero_materia", { ascending: true });
-      
+
       // Fetch año separately due to special character
       if (data) {
         const { data: fullData } = await supabase
           .from("subjects")
           .select("*")
           .order("numero_materia", { ascending: true });
-        
+
         if (fullData) {
           const subjectsWithYear = data.map((s, idx) => ({
             ...s,
@@ -349,6 +349,7 @@ export function useStudyRoom() {
           tipo: "videocall",
           duracion_segundos: duration,
           completada: true,
+          fecha: new Date().toISOString().split('T')[0],
         });
 
         // Update user stats

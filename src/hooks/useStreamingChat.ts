@@ -19,7 +19,7 @@ export function useStreamingChat() {
 
   const streamMessage = useCallback(async (
     messages: Array<{ role: string; content: string }>,
-    personality: string,
+    persona_id: string,
     onDelta: (text: string) => void,
     onComplete: (result: StreamResult) => void,
     onError: (error: Error) => void
@@ -43,8 +43,7 @@ export function useStreamingChat() {
             Authorization: `Bearer ${token}`,
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
-          // Note: userId is no longer sent - the server uses the authenticated user from the token
-          body: JSON.stringify({ messages, personality }),
+          body: JSON.stringify({ messages, persona_id }),
         }
       );
 
@@ -88,7 +87,7 @@ export function useStreamingChat() {
 
           try {
             const parsed = JSON.parse(jsonStr);
-            
+
             // Check for tool result (non-streaming)
             if (parsed.tool_result) {
               fullContent = parsed.content || "";

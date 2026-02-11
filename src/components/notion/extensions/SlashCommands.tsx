@@ -31,6 +31,8 @@ import {
   Music,
   Video,
   ExternalLink,
+  Columns,
+  Bookmark,
 } from "lucide-react";
 import {
   NOTION_TEXT_COLORS,
@@ -43,6 +45,7 @@ export interface CommandItem {
   icon: React.ReactNode;
   command: (props: { editor: any; range: any }) => void;
   category: string;
+  shortcut?: string;
 }
 
 const getSuggestionItems = (): CommandItem[] => [
@@ -52,6 +55,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Párrafo de texto normal",
     icon: <Type className="w-4 h-4" />,
     category: "Básico",
+    shortcut: "Ctrl+Shift+0",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setParagraph().run();
     },
@@ -61,6 +65,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Título principal grande",
     icon: <Heading1 className="w-4 h-4" />,
     category: "Básico",
+    shortcut: "# espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run();
     },
@@ -70,6 +75,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Subtítulo mediano",
     icon: <Heading2 className="w-4 h-4" />,
     category: "Básico",
+    shortcut: "## espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run();
     },
@@ -79,6 +85,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Subtítulo pequeño",
     icon: <Heading3 className="w-4 h-4" />,
     category: "Básico",
+    shortcut: "### espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run();
     },
@@ -89,6 +96,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Lista desordenada simple",
     icon: <List className="w-4 h-4" />,
     category: "Listas",
+    shortcut: "- espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).toggleBulletList().run();
     },
@@ -98,6 +106,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Lista ordenada con números",
     icon: <ListOrdered className="w-4 h-4" />,
     category: "Listas",
+    shortcut: "1. espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).toggleOrderedList().run();
     },
@@ -107,6 +116,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Checklist con casillas",
     icon: <CheckSquare className="w-4 h-4" />,
     category: "Listas",
+    shortcut: "[] espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).toggleTaskList().run();
     },
@@ -116,6 +126,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Lista colapsable",
     icon: <ChevronRight className="w-4 h-4" />,
     category: "Listas",
+    shortcut: "> Enter",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setDetails().run();
     },
@@ -126,6 +137,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Bloque de cita",
     icon: <Quote className="w-4 h-4" />,
     category: "Bloques",
+    shortcut: "\" espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setBlockquote().run();
     },
@@ -135,6 +147,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Bloque de código",
     icon: <Code className="w-4 h-4" />,
     category: "Bloques",
+    shortcut: "``` Enter",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setCodeBlock().run();
     },
@@ -144,6 +157,7 @@ const getSuggestionItems = (): CommandItem[] => [
     description: "Línea horizontal separadora",
     icon: <Minus className="w-4 h-4" />,
     category: "Bloques",
+    shortcut: "--- espacio",
     command: ({ editor, range }) => {
       editor.chain().focus().deleteRange(range).setHorizontalRule().run();
     },
@@ -297,6 +311,37 @@ const getSuggestionItems = (): CommandItem[] => [
       }
     },
   },
+  // Advanced
+  {
+    title: "2 Columnas",
+    description: "Dividir en 2 columnas",
+    icon: <Columns className="w-4 h-4" />,
+    category: "Avanzado",
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).setColumns(2).run();
+    },
+  },
+  {
+    title: "3 Columnas",
+    description: "Dividir en 3 columnas",
+    icon: <Columns className="w-4 h-4" />,
+    category: "Avanzado",
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).setColumns(3).run();
+    },
+  },
+  {
+    title: "Bookmark",
+    description: "Vista previa de enlace web",
+    icon: <Bookmark className="w-4 h-4" />,
+    category: "Avanzado",
+    command: ({ editor, range }) => {
+      const url = window.prompt("URL del enlace:");
+      if (url) {
+        editor.chain().focus().deleteRange(range).setBookmark({ url }).run();
+      }
+    },
+  },
 ];
 
 interface CommandListProps {
@@ -395,6 +440,11 @@ const CommandList = forwardRef<CommandListRef, CommandListProps>(
                     <p className="font-medium text-sm truncate">{item.title}</p>
                     <p className="text-xs text-muted-foreground truncate">{item.description}</p>
                   </div>
+                  {item.shortcut && (
+                    <span className="flex-shrink-0 text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'hsl(var(--secondary))', color: 'hsl(var(--muted-foreground))', border: '1px solid hsl(var(--border) / 0.5)' }}>
+                      {item.shortcut}
+                    </span>
+                  )}
                 </button>
               );
             })}

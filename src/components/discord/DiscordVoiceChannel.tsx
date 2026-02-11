@@ -1,206 +1,345 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
+import { Volume2, Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, MonitorOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Mic, MicOff, Video, VideoOff, Monitor } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/contexts/AuthContext";
 import type { DiscordChannel, DiscordVoiceParticipant } from "@/hooks/useDiscord";
 
 interface DiscordVoiceChannelProps {
   channel: DiscordChannel;
-  participants: DiscordVoiceParticipant[];
+  voiceParticipants?: DiscordVoiceParticipant[]; // Rename to voiceParticipants to match Discord.tsx usage, or keep participants
+  participants?: DiscordVoiceParticipant[]; // fallback
   localStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
   speakingUsers: Set<string>;
   isVideoEnabled: boolean;
   isAudioEnabled: boolean;
   isScreenSharing: boolean;
-  localUserId: string | null;
+  isDeafened: boolean; // Added prop
+  // localUserId removed from prop if using useAuth inside, but Discord.tsx doesn't pass it yet effectively 
+  // Let's rely on useAuth for localUserId
+  onToggleAudio: () => void;
+  onToggleVideo: () => void;
+  onToggleScreenShare: () => void;
+  onLeaveChannel: () => void; // Renamed to match Discord.tsx
 }
 
 export function DiscordVoiceChannel({
   channel,
-  participants,
+  voiceParticipants,
+  participants, // fallback
   localStream,
   remoteStreams,
   speakingUsers,
   isVideoEnabled,
   isAudioEnabled,
   isScreenSharing,
-  localUserId,
+  isDeafened,
+  onToggleAudio,
+  onToggleVideo,
+  onToggleScreenShare,
+  onLeaveChannel,
 }: DiscordVoiceChannelProps) {
-  const totalParticipants = participants.length;
-  
-  const getGridClass = () => {
-    if (totalParticipants <= 1) return "grid-cols-1";
-    if (totalParticipants <= 2) return "grid-cols-2";
-    if (totalParticipants <= 4) return "grid-cols-2";
-    if (totalParticipants <= 6) return "grid-cols-3";
-    if (totalParticipants <= 9) return "grid-cols-3";
-    return "grid-cols-4";
-  };
+  const { user } = useAuth();
+  const localUserId = user?.id || "";
+
+  // Normalize participants
+  const activeParticipants = voiceParticipants || participants || [];
+
+  // Find screen sharer
+  const screenSharer = activeParticipants.find(p => p.is_screen_sharing);
+
+  // Theme: Deep Blue
+  // Main BG: bg-background (since main container is bg-background)
+  // But we want separate look for voice area? No, user wants consistency.
+  // We'll use bg-transparent to let radial gradient show through, or bg-black/40 for overlay.
 
   return (
-    <div className="flex-1 bg-[#1e1f22] p-4">
-      <div className={cn("grid gap-4 h-full", getGridClass())}>
-        {participants.map((participant) => {
-          const isLocal = !!localUserId && participant.user_id === localUserId;
-          const stream = isLocal ? localStream : remoteStreams.get(participant.user_id) || null;
+    <div className="flex-1 flex flex-col bg-transparent relative z-10 h-full">
+      {/* Header */}
+      <div className="h-12 px-4 flex items-center border-b border-border bg-background/95 backdrop-blur shrink-0 transition-colors">
+        <Volume2 className="w-5 h-5 text-muted-foreground mr-2" />
+        <span className="font-bold text-foreground text-[15px]">{channel.name}</span>
+        <div className="w-px h-6 bg-border mx-3" />
+        <div className="flex items-center gap-2">
+          <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          <span className="text-sm text-muted-foreground font-medium">
+            {activeParticipants.length} {activeParticipants.length === 1 ? "conectado" : "conectados"}
+          </span>
+        </div>
+      </div>
 
-          return (
-            <VoiceTile
-              key={participant.id}
-              participant={participant}
-              stream={stream}
-              isSpeaking={speakingUsers.has(participant.user_id)}
-              isLocal={isLocal}
-              localVideoEnabled={isLocal ? isVideoEnabled : undefined}
-            />
-          );
-        })}
+      {/* Main video area */}
+      <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+        {screenSharer ? (
+          // Screen share mode
+          <div className="w-full h-full flex gap-4">
+            {/* Main screen share */}
+            <div className="flex-1 bg-black/80 rounded-xl overflow-hidden relative flex items-center justify-center border border-border/50 shadow-2xl">
+              {screenSharer.user_id === localUserId ? (
+                <div className="text-center text-muted-foreground animate-pulse">
+                  <Monitor className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                  <p className="text-xl font-bold font-orbitron text-primary">Estás compartiendo tu pantalla</p>
+                </div>
+              ) : (
+                <VideoTile
+                  participant={screenSharer}
+                  stream={remoteStreams.get(screenSharer.user_id)}
+                  isSpeaking={false}
+                  isLocal={false}
+                  isScreenShare
+                />
+              )}
+              <div className="absolute bottom-4 left-4 bg-background/80 backdrop-blur px-4 py-1.5 rounded-full text-foreground text-sm font-medium border border-border shadow-lg flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-primary" />
+                Pantalla de {screenSharer.profile?.nombre || "Usuario"}
+              </div>
+            </div>
+
+            {/* Small participant tiles */}
+            <div className="w-60 flex flex-col gap-3 overflow-y-auto pr-1 discord-scrollbar">
+              {activeParticipants.map(p => (
+                <SmallTile
+                  key={p.id}
+                  participant={p}
+                  stream={p.user_id === localUserId ? localStream : remoteStreams.get(p.user_id)}
+                  isSpeaking={speakingUsers.has(p.user_id)}
+                  isLocal={p.user_id === localUserId}
+                  isVideoEnabled={p.user_id === localUserId ? isVideoEnabled : p.is_camera_on} // Use is_camera_on from DB or local state
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          // Normal video grid
+          <div className={cn(
+            "grid gap-4 w-full h-full place-items-center transition-all duration-300",
+            activeParticipants.length <= 1 && "grid-cols-1 max-w-3xl max-h-[600px]",
+            activeParticipants.length === 2 && "grid-cols-2 max-h-[500px]",
+            activeParticipants.length >= 3 && activeParticipants.length <= 4 && "grid-cols-2 grid-rows-2",
+            activeParticipants.length > 4 && "grid-cols-3 grid-rows-2"
+          )}>
+            {activeParticipants.map(p => (
+              <VideoTile
+                key={p.id}
+                participant={p}
+                stream={p.user_id === localUserId ? localStream : remoteStreams.get(p.user_id)}
+                isSpeaking={speakingUsers.has(p.user_id)}
+                isLocal={p.user_id === localUserId}
+                isVideoEnabled={p.user_id === localUserId ? isVideoEnabled : p.is_camera_on}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Controls */}
+      <div className="h-20 bg-background/95 backdrop-blur border-t border-border flex items-center justify-center gap-4 relative z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.2)]">
+        <ControlBtn
+          icon={isAudioEnabled ? Mic : MicOff}
+          active={!isAudioEnabled}
+          onClick={onToggleAudio}
+          tooltip={isAudioEnabled ? "Silenciar" : "Activar micrófono"}
+          variant={!isAudioEnabled ? "destructive" : "secondary"}
+        />
+
+        <ControlBtn
+          icon={isVideoEnabled ? Video : VideoOff}
+          active={!isVideoEnabled}
+          onClick={onToggleVideo}
+          tooltip={isVideoEnabled ? "Desactivar cámara" : "Activar cámara"}
+          variant={!isVideoEnabled ? "destructive" : "secondary"}
+        />
+
+        <ControlBtn
+          icon={isScreenSharing ? MonitorOff : Monitor}
+          active={isScreenSharing}
+          onClick={onToggleScreenShare}
+          tooltip={isScreenSharing ? "Dejar de compartir" : "Compartir pantalla"}
+          variant={isScreenSharing ? "active" : "secondary"}
+        />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onLeaveChannel}
+              className="ml-4 px-5 h-12 rounded-full flex items-center gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-all duration-200 shadow-lg shadow-destructive/20 hover:-translate-y-1 font-medium text-sm"
+            >
+              <PhoneOff className="w-5 h-5" />
+              <span>Desconectar</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Salir del canal de voz</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
 }
 
-function VoiceTile({
+// Subcomponents
+function VideoTile({
   participant,
   stream,
   isSpeaking,
   isLocal,
-  localVideoEnabled,
+  isScreenShare = false,
+  isVideoEnabled = false
 }: {
   participant: DiscordVoiceParticipant;
-  stream: MediaStream | null;
+  stream?: MediaStream | null;
   isSpeaking: boolean;
   isLocal: boolean;
-  localVideoEnabled?: boolean;
+  isScreenShare?: boolean;
+  isVideoEnabled?: boolean;
 }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  // For the LOCAL user, use the local React state (instant) instead of the DB flag (has latency).
-  // For REMOTE users, use the DB flag since that's all we have.
-  const hasVideoTracks = !!(stream && stream.getVideoTracks().some(t => t.readyState === "live" && t.enabled));
-  const hasVideo = isLocal
-    ? (localVideoEnabled === true && hasVideoTracks)
-    : (participant.is_camera_on && hasVideoTracks);
-
-  const hasAudio = !!(stream && stream.getAudioTracks().length > 0);
-  const displayName = participant.profile?.nombre || participant.profile?.username || "Usuario";
-
-  // Use a ref callback for the video element.
-  // This ensures srcObject is assigned the INSTANT the <video> DOM node mounts,
-  // even if the stream reference hasn't changed (which would prevent useEffect from firing).
-  const videoRefCallback = useCallback(
-    (el: HTMLVideoElement | null) => {
-      if (el && stream) {
-        if (el.srcObject !== stream) {
-          el.srcObject = stream;
-          // Ensure playback starts (some browsers block autoplay silently)
-          el.play().catch(() => {});
-        }
-      }
-    },
-    [stream]
-  );
-
-  // Also update srcObject when stream changes on an already-mounted video
-  // (e.g., remote stream arriving while video element is already visible)
   useEffect(() => {
-    if (audioRef.current && stream) {
-      audioRef.current.srcObject = stream;
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
     }
   }, [stream]);
 
   return (
-    <div
-      className={cn(
-        "relative rounded-lg overflow-hidden bg-[#2b2d31] transition-all duration-200",
-        isSpeaking && "discord-speaking-ring"
-      )}
-    >
-      {hasVideo || participant.is_screen_sharing ? (
+    <div className={cn(
+      "relative bg-card rounded-xl overflow-hidden w-full h-full flex items-center justify-center transition-all duration-300 shadow-xl border border-border group",
+      isSpeaking && "ring-2 ring-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)]",
+      !isScreenShare && "aspect-video max-h-full"
+    )}>
+      {isVideoEnabled && stream ? (
         <video
-          ref={videoRefCallback}
+          ref={videoRef}
           autoPlay
+          muted={isLocal} // Mute local video
           playsInline
-          muted={isLocal}
-          className={cn(
-            "w-full h-full object-cover",
-            isLocal && !participant.is_screen_sharing && "transform scale-x-[-1]"
-          )}
+          className={cn("w-full h-full object-cover", isLocal && "scale-x-[-1]")} // Mirror local
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center bg-[#2b2d31]">
-          {hasAudio && (
-            <audio
-              ref={audioRef}
-              autoPlay
-              playsInline
-              muted={isLocal}
-              className="hidden"
-            />
-          )}
+        <div className="absolute inset-0 flex items-center justify-center bg-muted/20">
           <Avatar className={cn(
-            "w-24 h-24 transition-all duration-200",
-            isSpeaking && "ring-4 ring-[#23a559] ring-offset-2 ring-offset-[#2b2d31]"
+            "transition-all duration-300 ring-4 ring-transparent",
+            isSpeaking ? "w-32 h-32 ring-green-500/50 scale-110" : "w-24 h-24",
+            isScreenShare && "w-16 h-16"
           )}>
             <AvatarImage src={participant.profile?.avatar_url || undefined} />
-            <AvatarFallback className="bg-[#5865f2] text-white text-3xl">
-              {displayName[0].toUpperCase()}
+            <AvatarFallback className="text-3xl bg-primary text-primary-foreground font-bold">
+              {participant.profile?.username?.substring(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>
         </div>
       )}
 
-      {/* Overlay with user info */}
-      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className={cn(
-              "text-sm font-medium transition-colors duration-200",
-              isSpeaking ? "text-[#23a559]" : "text-white"
-            )}>
-              {isLocal ? "Tú" : displayName}
-            </span>
-            {participant.is_screen_sharing && (
-              <div className="px-1.5 py-0.5 bg-[#23a559] rounded text-[10px] text-white font-medium">
-                COMPARTIENDO
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            {participant.is_screen_sharing && (
-              <div className="p-1 rounded bg-[#23a559]">
-                <Monitor className="w-3 h-3 text-white" />
-              </div>
-            )}
-            <div className={cn(
-              "p-1 rounded",
-              participant.is_muted ? "bg-[#ed4245]" : "bg-white/20"
-            )}>
-              {participant.is_muted ? (
-                <MicOff className="w-3 h-3 text-white" />
-              ) : (
-                <Mic className="w-3 h-3 text-white" />
-              )}
-            </div>
-            <div className={cn(
-              "p-1 rounded",
-              !participant.is_camera_on ? "bg-[#ed4245]" : "bg-white/20"
-            )}>
-              {participant.is_camera_on ? (
-                <Video className="w-3 h-3 text-white" />
-              ) : (
-                <VideoOff className="w-3 h-3 text-white" />
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Overlays */}
+      <div className="absolute bottom-3 left-3 bg-black/60 px-3 py-1.5 rounded-full text-white text-sm font-medium flex items-center gap-2 backdrop-blur-sm border border-white/10">
+        {isSpeaking ? (
+          <Volume2 className="w-4 h-4 text-green-400 animate-pulse" />
+        ) : participant.is_muted ? (
+          <MicOff className="w-4 h-4 text-red-400" />
+        ) : (
+          <Mic className="w-4 h-4 text-gray-300" />
+        )}
+        <span className="max-w-[120px] truncate drop-shadow-md">
+          {isLocal ? "Tú" : (participant.profile?.username || "Usuario")}
+        </span>
       </div>
 
-      {/* Speaking glow animation - Discord style */}
+      {/* Speaking Visualizer (Sound Waves) */}
       {isSpeaking && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg discord-speaking-glow" />
+        <div className="absolute top-3 right-3 discord-sound-wave">
+          <div className="bar" />
+          <div className="bar" />
+          <div className="bar" />
+        </div>
       )}
     </div>
+  );
+}
+
+function SmallTile({
+  participant,
+  stream,
+  isSpeaking,
+  isVideoEnabled,
+  isLocal
+}: {
+  participant: DiscordVoiceParticipant;
+  stream?: MediaStream | null;
+  isSpeaking: boolean;
+  isVideoEnabled?: boolean;
+  isLocal: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className={cn(
+      "aspect-video bg-card rounded-lg overflow-hidden relative border border-border shadow-md transition-all hover:scale-105 cursor-pointer",
+      isSpeaking && "ring-2 ring-green-500"
+    )}>
+      {isVideoEnabled && stream ? (
+        <video ref={videoRef} autoPlay muted={isLocal} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-muted/30">
+          <Avatar className="w-10 h-10">
+            <AvatarImage src={participant.profile?.avatar_url || undefined} />
+            <AvatarFallback>{participant.profile?.username?.substring(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlBtn({
+  icon: Icon,
+  active,
+  onClick,
+  tooltip,
+  variant = "secondary",
+  className
+}: any) {
+  // define variants
+  const variants: any = {
+    secondary: "bg-muted text-foreground hover:bg-muted/80 hover:text-primary hover:-translate-y-1",
+    active: "bg-white text-black hover:bg-gray-200",
+    destructive: "bg-white text-black hover:bg-gray-200 relative overflow-hidden", // White like Discord mute? No, user wants theme. Discord uses white with red slash or just white button for active.
+    // Let's stick to App Theme:
+    // Active (Muted/Off) -> Destructive Red? Or just White? Discord uses White button with internal strikethrough.
+    // I'll use: Mute -> White bg + Black icon + Strikethrough?
+    "danger-solid": "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:-translate-y-1 shadow-lg shadow-destructive/20"
+  };
+
+  // If active=true (e.g. isMuted), use white style
+  const finalClass = variant === 'destructive'
+    ? "bg-white text-black hover:bg-gray-200"
+    : variants[variant];
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={cn(
+            "w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 shadow-md",
+            finalClass,
+            className
+          )}
+        >
+          <Icon className={cn("w-6 h-6", variant === 'secondary' && "text-foreground")} />
+          {variant === 'destructive' && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-8 h-0.5 bg-red-600 rotate-45 rounded-full" />
+            </div>
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }

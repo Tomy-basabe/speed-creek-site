@@ -73,7 +73,7 @@ interface StudyRoomContextType {
   subjects: Subject[];
   loading: boolean;
   sessionStartTime: Date | null;
-  
+
   // WebRTC state
   localStream: MediaStream | null;
   displayStream: MediaStream | null;
@@ -82,14 +82,14 @@ interface StudyRoomContextType {
   isVideoEnabled: boolean;
   isScreenSharing: boolean;
   connectionState: "connecting" | "connected" | "disconnected";
-  
+
   // Room actions
   createRoom: (name: string, subjectId?: string) => Promise<StudyRoom | null>;
   joinRoom: (roomId: string, subjectId?: string) => Promise<boolean>;
   leaveRoom: () => Promise<void>;
   updateMyState: (updates: Partial<Pick<RoomParticipant, "is_muted" | "is_camera_off" | "is_sharing_screen" | "subject_id">>) => Promise<void>;
   fetchActiveRooms: () => Promise<void>;
-  
+
   // WebRTC actions
   toggleAudio: () => void;
   toggleVideo: () => Promise<void>;
@@ -102,7 +102,7 @@ const StudyRoomContext = createContext<StudyRoomContextType | null>(null);
 export function StudyRoomProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   // Room state
   const [activeRooms, setActiveRooms] = useState<StudyRoom[]>([]);
   const [currentRoom, setCurrentRoom] = useState<StudyRoom | null>(null);
@@ -111,7 +111,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
-  
+
   // WebRTC state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -121,7 +121,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "disconnected">("disconnected");
-  
+
   // Refs
   const peerConnections = useRef<Map<string, PeerConnection>>(new Map());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -135,13 +135,13 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
         .from("subjects")
         .select("id, nombre, codigo")
         .order("numero_materia", { ascending: true });
-      
+
       if (data) {
         const { data: fullData } = await supabase
           .from("subjects")
           .select("*")
           .order("numero_materia", { ascending: true });
-        
+
         if (fullData) {
           const subjectsWithYear = data.map((s, idx) => ({
             ...s,
@@ -723,6 +723,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
           tipo: "videocall",
           duracion_segundos: duration,
           completada: true,
+          fecha: new Date().toISOString().split('T')[0],
         });
 
         const { data: stats } = await supabase
@@ -822,7 +823,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
     if (!stream) return;
 
     const videoTracks = stream.getVideoTracks();
-    
+
     if (isVideoEnabled) {
       videoTracks.forEach((track) => {
         track.enabled = false;
@@ -841,7 +842,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
           });
           const newVideoTrack = newStream.getVideoTracks()[0];
           stream.addTrack(newVideoTrack);
-          
+
           peerConnections.current.forEach(({ connection }) => {
             const sender = connection.getSenders().find((s) => s.track?.kind === "video");
             if (sender) {
@@ -850,7 +851,7 @@ export function StudyRoomProvider({ children }: { children: ReactNode }) {
               connection.addTrack(newVideoTrack, stream);
             }
           });
-          
+
           setLocalStream(stream);
           setDisplayStream(stream);
           setIsVideoEnabled(true);

@@ -1,73 +1,128 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
-
-const emojiCategories = {
-  frecuentes: ["📝", "📚", "📖", "✏️", "📐", "🎯", "💡", "🔬", "💻", "🧮"],
-  estudio: ["📚", "📖", "📕", "📗", "📘", "📙", "📓", "📒", "📃", "📄"],
-  ciencia: ["🔬", "🧪", "🧫", "🧬", "⚗️", "🔭", "🌡️", "⚛️", "🧲", "💎"],
-  tecnología: ["💻", "🖥️", "📱", "⌨️", "🖱️", "💾", "📀", "🔌", "🔋", "📡"],
-  matemáticas: ["🧮", "📐", "📏", "➕", "➖", "✖️", "➗", "🔢", "📊", "📈"],
-  objetos: ["✏️", "🖊️", "🖋️", "📌", "📍", "🔎", "🔍", "🗂️", "📁", "📂"],
-  símbolos: ["⭐", "🌟", "✨", "💫", "🎯", "🎪", "🎨", "🎭", "🎬", "🎤"],
-  naturaleza: ["🌱", "🌿", "🍀", "🌺", "🌻", "🌸", "🌷", "🌹", "🍃", "🌾"],
-};
+import {
+  tabeIcons,
+  getIconCategories,
+  TabeIconRenderer,
+} from "./TabeIcons";
 
 interface EmojiPickerProps {
   value: string;
-  onChange: (emoji: string) => void;
+  onChange: (iconId: string) => void;
 }
 
 export function EmojiPicker({ value, onChange }: EmojiPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<keyof typeof emojiCategories>("frecuentes");
+  const categories = useMemo(getIconCategories, []);
+  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
+
+  const filteredIcons = useMemo(
+    () => tabeIcons.filter((i) => i.category === selectedCategory),
+    [selectedCategory]
+  );
 
   return (
-    <div className="relative">
+    <div className="relative inline-block">
+      {/* Trigger button — shows current icon */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="text-4xl hover:scale-110 transition-transform"
+        className="notion-emoji-button"
+        title="Cambiar icono"
       >
-        {value}
+        <TabeIconRenderer iconId={value} size={40} />
       </button>
 
       {isOpen && (
         <>
-          <div 
-            className="fixed inset-0 z-40" 
-            onClick={() => setIsOpen(false)} 
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setIsOpen(false)}
           />
-          <div className="absolute top-full left-0 mt-2 z-50 bg-card border border-border rounded-xl shadow-xl p-3 w-72">
+
+          {/* Picker panel */}
+          <div
+            className="absolute top-full left-0 mt-2 z-50 border rounded-xl shadow-xl p-3 w-80"
+            style={{
+              background: "hsl(var(--card))",
+              borderColor: "hsl(var(--border))",
+            }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between mb-3 pb-2"
+              style={{ borderBottom: "1px solid hsl(var(--border) / 0.5)" }}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--muted-foreground))" }}>
+                Iconos T.A.B.E.
+              </span>
+              <button
+                onClick={() => {
+                  onChange("book");
+                  setIsOpen(false);
+                }}
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ color: "hsl(var(--muted-foreground))" }}
+              >
+                Reset
+              </button>
+            </div>
+
             {/* Category tabs */}
-            <div className="flex gap-1 mb-2 overflow-x-auto pb-1">
-              {Object.keys(emojiCategories).map((cat) => (
+            <div className="flex gap-1 mb-3 overflow-x-auto pb-1">
+              {categories.map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => setSelectedCategory(cat as keyof typeof emojiCategories)}
+                  onClick={() => setSelectedCategory(cat)}
                   className={cn(
-                    "px-2 py-1 text-xs rounded-lg whitespace-nowrap transition-colors",
+                    "px-3 py-1.5 text-xs rounded-lg whitespace-nowrap transition-all font-medium",
                     selectedCategory === cat
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-secondary"
+                      ? "text-white shadow-md"
+                      : "hover:bg-[hsl(var(--secondary))]"
                   )}
+                  style={
+                    selectedCategory === cat
+                      ? {
+                        background: "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.7))",
+                      }
+                      : undefined
+                  }
                 >
-                  {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  {cat}
                 </button>
               ))}
             </div>
 
-            {/* Emoji grid */}
-            <div className="grid grid-cols-8 gap-1">
-              {emojiCategories[selectedCategory].map((emoji, index) => (
+            {/* Icon grid */}
+            <div className="grid grid-cols-5 gap-2">
+              {filteredIcons.map((icon) => (
                 <button
-                  key={index}
+                  key={icon.id}
                   onClick={() => {
-                    onChange(emoji);
+                    onChange(icon.id);
                     setIsOpen(false);
                   }}
-                  className="text-xl p-1 rounded hover:bg-secondary transition-colors"
+                  className={cn(
+                    "flex flex-col items-center gap-1 p-2 rounded-lg transition-all",
+                    value === icon.id
+                      ? "ring-2 ring-[hsl(var(--primary))]"
+                      : "hover:bg-[hsl(var(--secondary))]"
+                  )}
+                  style={
+                    value === icon.id
+                      ? { background: "hsl(var(--primary) / 0.1)" }
+                      : undefined
+                  }
+                  title={icon.name}
                 >
-                  {emoji}
+                  <icon.component size={28} />
+                  <span
+                    className="text-[10px] truncate w-full text-center"
+                    style={{ color: "hsl(var(--muted-foreground))" }}
+                  >
+                    {icon.name}
+                  </span>
                 </button>
               ))}
             </div>

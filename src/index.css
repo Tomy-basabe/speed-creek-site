@@ -1,9 +1,9 @@
+/* T.A.B.E. - Gamer Academic System Design System */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* T.A.B.E. - Gamer Academic System Design System */
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -46,7 +46,7 @@
     --neon-gold: 45 100% 45%;
     --neon-purple: 270 80% 55%;
     --neon-red: 0 80% 50%;
-    
+
     /* Status Colors */
     --status-approved: 45 100% 45%;
     --status-available: 142 70% 40%;
@@ -117,7 +117,7 @@
     --neon-gold: 45 100% 55%;
     --neon-purple: 270 100% 65%;
     --neon-red: 0 100% 60%;
-    
+
     /* Status Colors */
     --status-approved: 45 100% 55%;
     --status-available: 142 76% 50%;
@@ -160,21 +160,27 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: 'Orbitron', sans-serif;
   }
 }
 
 @layer utilities {
+
   /* Glow Effects */
   .glow-cyan {
     box-shadow: var(--glow-cyan);
   }
-  
+
   .glow-green {
     box-shadow: var(--glow-green);
   }
-  
+
   .glow-gold {
     box-shadow: var(--glow-gold);
   }
@@ -257,15 +263,15 @@
   /* LEGENDARY Subject Card - Epic Approved State */
   .subject-legendary {
     position: relative;
-    background: linear-gradient(
-      135deg, 
-      hsl(45 100% 15% / 0.9) 0%, 
-      hsl(35 100% 10% / 0.95) 50%,
-      hsl(45 100% 15% / 0.9) 100%
-    );
+    background: linear-gradient(135deg,
+        hsl(45 100% 15% / 0.9) 0%,
+        hsl(35 100% 10% / 0.95) 50%,
+        hsl(45 100% 15% / 0.9) 100%);
     border: 2px solid transparent;
     border-radius: 0.75rem;
     overflow: hidden;
+    contain: layout style;
+    will-change: box-shadow;
   }
 
   /* Animated gold border */
@@ -275,14 +281,12 @@
     inset: 0;
     border-radius: inherit;
     padding: 2px;
-    background: linear-gradient(
-      135deg,
-      hsl(45 100% 55%) 0%,
-      hsl(35 100% 65%) 25%,
-      hsl(45 100% 75%) 50%,
-      hsl(35 100% 65%) 75%,
-      hsl(45 100% 55%) 100%
-    );
+    background: linear-gradient(135deg,
+        hsl(45 100% 55%) 0%,
+        hsl(35 100% 65%) 25%,
+        hsl(45 100% 75%) 50%,
+        hsl(35 100% 65%) 75%,
+        hsl(45 100% 55%) 100%);
     background-size: 200% 200%;
     animation: legendary-border 3s linear infinite;
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -299,31 +303,36 @@
     left: -50%;
     width: 200%;
     height: 200%;
-    background: linear-gradient(
-      45deg,
-      transparent 30%,
-      hsl(45 100% 70% / 0.1) 45%,
-      hsl(45 100% 90% / 0.2) 50%,
-      hsl(45 100% 70% / 0.1) 55%,
-      transparent 70%
-    );
+    background: linear-gradient(45deg,
+        transparent 30%,
+        hsl(45 100% 70% / 0.1) 45%,
+        hsl(45 100% 90% / 0.2) 50%,
+        hsl(45 100% 70% / 0.1) 55%,
+        transparent 70%);
     animation: legendary-shine 4s ease-in-out infinite;
     pointer-events: none;
+    will-change: transform;
   }
 
   @keyframes legendary-border {
-    0%, 100% {
+
+    0%,
+    100% {
       background-position: 0% 50%;
     }
+
     50% {
       background-position: 100% 50%;
     }
   }
 
   @keyframes legendary-shine {
-    0%, 100% {
+
+    0%,
+    100% {
       transform: rotate(25deg) translateX(-100%);
     }
+
     50% {
       transform: rotate(25deg) translateX(100%);
     }
@@ -331,18 +340,23 @@
 
   /* Floating particles for legendary */
   @keyframes legendary-particle {
-    0%, 100% {
+
+    0%,
+    100% {
       opacity: 0;
       transform: translateY(0) scale(0);
     }
+
     10% {
       opacity: 1;
       transform: translateY(0) scale(1);
     }
+
     90% {
       opacity: 1;
       transform: translateY(-30px) scale(1);
     }
+
     100% {
       opacity: 0;
       transform: translateY(-35px) scale(0);
@@ -363,43 +377,49 @@
     height: 4px;
     background: hsl(45 100% 70%);
     border-radius: 50%;
-    box-shadow: 0 0 6px hsl(45 100% 60%), 0 0 12px hsl(45 100% 50%);
+    box-shadow: 0 0 6px hsl(45 100% 60%);
     animation: legendary-particle 3s ease-in-out infinite;
+    will-change: transform, opacity;
   }
 
   /* Epic glow pulse for legendary */
   @keyframes legendary-glow {
-    0%, 100% {
-      box-shadow: 
+
+    0%,
+    100% {
+      box-shadow:
         0 0 20px hsl(45 100% 55% / 0.4),
-        0 0 40px hsl(45 100% 55% / 0.2),
-        0 0 60px hsl(45 100% 55% / 0.1),
-        inset 0 0 20px hsl(45 100% 55% / 0.05);
+        0 0 40px hsl(45 100% 55% / 0.2);
     }
+
     50% {
-      box-shadow: 
-        0 0 30px hsl(45 100% 60% / 0.6),
-        0 0 60px hsl(45 100% 55% / 0.4),
-        0 0 90px hsl(45 100% 55% / 0.2),
-        inset 0 0 30px hsl(45 100% 55% / 0.1);
+      box-shadow:
+        0 0 30px hsl(45 100% 60% / 0.5),
+        0 0 60px hsl(45 100% 55% / 0.3);
     }
   }
 
   .animate-legendary-glow {
     animation: legendary-glow 2.5s ease-in-out infinite;
+    will-change: box-shadow;
   }
 
   /* Crown icon animation */
   @keyframes crown-float {
-    0%, 100% {
+
+    0%,
+    100% {
       transform: translateY(0) rotate(-2deg);
     }
+
     25% {
       transform: translateY(-3px) rotate(0deg);
     }
+
     50% {
       transform: translateY(-1px) rotate(2deg);
     }
+
     75% {
       transform: translateY(-4px) rotate(0deg);
     }
@@ -414,20 +434,19 @@
     0% {
       background-position: -200% center;
     }
+
     100% {
       background-position: 200% center;
     }
   }
 
   .legendary-text {
-    background: linear-gradient(
-      90deg,
-      hsl(45 100% 55%) 0%,
-      hsl(45 100% 75%) 25%,
-      hsl(45 100% 90%) 50%,
-      hsl(45 100% 75%) 75%,
-      hsl(45 100% 55%) 100%
-    );
+    background: linear-gradient(90deg,
+        hsl(45 100% 55%) 0%,
+        hsl(45 100% 75%) 25%,
+        hsl(45 100% 90%) 50%,
+        hsl(45 100% 75%) 75%,
+        hsl(45 100% 55%) 100%);
     background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -452,9 +471,12 @@
 
   /* Pulse Animation for Gold */
   @keyframes pulse-gold {
-    0%, 100% {
+
+    0%,
+    100% {
       box-shadow: 0 0 15px hsl(45 100% 55% / 0.4), 0 0 30px hsl(45 100% 55% / 0.2);
     }
+
     50% {
       box-shadow: 0 0 25px hsl(45 100% 55% / 0.6), 0 0 50px hsl(45 100% 55% / 0.3);
     }
@@ -469,6 +491,7 @@
     0% {
       transform: translateY(-100%);
     }
+
     100% {
       transform: translateY(100%);
     }
@@ -508,7 +531,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
     animation: shimmer 2s infinite;
   }
 
@@ -516,6 +539,7 @@
     0% {
       transform: translateX(-100%);
     }
+
     100% {
       transform: translateX(100%);
     }
@@ -523,9 +547,12 @@
 
   /* Floating Animation */
   @keyframes float {
-    0%, 100% {
+
+    0%,
+    100% {
       transform: translateY(0px);
     }
+
     50% {
       transform: translateY(-5px);
     }
@@ -537,15 +564,20 @@
 
   /* Shuffle Card Animation */
   @keyframes shuffle-card {
-    0%, 100% {
+
+    0%,
+    100% {
       transform: translateX(0) translateY(0) rotate(0deg);
     }
+
     25% {
       transform: translateX(-30px) translateY(-10px) rotate(-15deg);
     }
+
     50% {
       transform: translateX(30px) translateY(-20px) rotate(15deg);
     }
+
     75% {
       transform: translateX(-15px) translateY(-5px) rotate(-8deg);
     }
@@ -556,6 +588,7 @@
     0% {
       transform: translateX(-100%);
     }
+
     100% {
       transform: translateX(200%);
     }
@@ -571,6 +604,7 @@
       transform: translateY(-20px) rotate(0deg);
       opacity: 1;
     }
+
     100% {
       transform: translateY(100vh) rotate(720deg);
       opacity: 0;
@@ -587,6 +621,7 @@
       transform: translateX(-100px) rotate(-10deg);
       opacity: 0;
     }
+
     100% {
       transform: translateX(0) rotate(0deg);
       opacity: 1;
@@ -603,6 +638,7 @@
       transform: translateX(0) rotate(0deg);
       opacity: 1;
     }
+
     100% {
       transform: translateX(100px) rotate(10deg);
       opacity: 0;
@@ -617,16 +653,58 @@
   .deck-stack:hover .deck-card-1 {
     transform: translateY(-4px) rotate(3deg);
   }
+
   .deck-stack:hover .deck-card-2 {
     transform: translateY(-2px) rotate(1deg);
   }
 }
 
+/* Discord Soundwave Animation for Voice Tiles */
+@keyframes soundwave {
+  0% {
+    height: 20%;
+  }
+
+  100% {
+    height: 100%;
+  }
+}
+
+.discord-sound-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 24px;
+}
+
+.discord-sound-wave .bar {
+  width: 3px;
+  background-color: #4ade80;
+  /* green-400 */
+  border-radius: 9999px;
+  animation: soundwave 0.5s ease-in-out infinite alternate;
+}
+
+.discord-sound-wave .bar:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.discord-sound-wave .bar:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.discord-sound-wave .bar:nth-child(3) {
+  animation-delay: 300ms;
+}
+
 /* Discord Speaking Animation */
 @keyframes discord-speaking-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 0 2px #23a559, 0 0 8px 1px rgba(35, 165, 89, 0.4);
   }
+
   50% {
     box-shadow: 0 0 0 3px #23a559, 0 0 14px 3px rgba(35, 165, 89, 0.6);
   }
@@ -641,4 +719,160 @@
   box-shadow: inset 0 0 20px rgba(35, 165, 89, 0.15);
   border: 2px solid rgba(35, 165, 89, 0.7);
   animation: discord-speaking-pulse 1.2s ease-in-out infinite;
+}
+
+/* Discord Sound Wave Bars */
+@keyframes discord-wave-bar-1 {
+
+  0%,
+  100% {
+    height: 4px;
+  }
+
+  50% {
+    height: 14px;
+  }
+}
+
+@keyframes discord-wave-bar-2 {
+
+  0%,
+  100% {
+    height: 8px;
+  }
+
+  50% {
+    height: 18px;
+  }
+}
+
+@keyframes discord-wave-bar-3 {
+
+  0%,
+  100% {
+    height: 6px;
+  }
+
+  50% {
+    height: 12px;
+  }
+}
+
+.discord-sound-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+}
+
+.discord-sound-wave .bar {
+  width: 3px;
+  background: #23a559;
+  border-radius: 2px;
+  transition: height 0.1s ease;
+}
+
+.discord-sound-wave .bar:nth-child(1) {
+  animation: discord-wave-bar-1 0.6s ease-in-out infinite;
+}
+
+.discord-sound-wave .bar:nth-child(2) {
+  animation: discord-wave-bar-2 0.6s ease-in-out infinite 0.15s;
+}
+
+.discord-sound-wave .bar:nth-child(3) {
+  animation: discord-wave-bar-3 0.6s ease-in-out infinite 0.3s;
+}
+
+/* Discord Typing Dots */
+@keyframes discord-typing-dot {
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.discord-typing-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.discord-typing-dots .dot {
+  width: 4px;
+  height: 4px;
+  background: #b5bac1;
+  border-radius: 50%;
+}
+
+.discord-typing-dots .dot:nth-child(1) {
+  animation: discord-typing-dot 1.4s infinite;
+}
+
+.discord-typing-dots .dot:nth-child(2) {
+  animation: discord-typing-dot 1.4s infinite 0.2s;
+}
+
+.discord-typing-dots .dot:nth-child(3) {
+  animation: discord-typing-dot 1.4s infinite 0.4s;
+}
+
+/* Discord Custom Scrollbar */
+.discord-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.discord-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.discord-scrollbar::-webkit-scrollbar-thumb {
+  background: #1a1b1e;
+  border-radius: 4px;
+}
+
+.discord-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #222428;
+}
+
+/* Discord Voice Connected Signal */
+@keyframes discord-signal-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.discord-signal-icon {
+  animation: discord-signal-pulse 2s ease-in-out infinite;
+}
+
+/* Reduce animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+
+  .animate-legendary-glow,
+  .subject-legendary::before,
+  .subject-legendary::after,
+  .legendary-particle,
+  .animate-crown,
+  .legendary-text,
+  .animate-pulse-gold,
+  .animate-float,
+  .animate-shimmer,
+  .scanline::after,
+  .progress-gamer-bar::after {
+    animation: none !important;
+  }
 }

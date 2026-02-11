@@ -1,6 +1,8 @@
 import { Toaster } from "@/components/ui/toaster";
 import Forest from "./pages/Forest";
 import Discord from "./pages/Discord";
+import { DiscordVoiceProvider } from "@/contexts/DiscordVoiceContext";
+import { GlobalDiscordVoiceWidget } from "@/components/discord/GlobalDiscordVoiceWidget";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -23,6 +25,7 @@ import AdminPanel from "@/pages/AdminPanel";
 import NotFound from "@/pages/NotFound";
 import Friends from "@/pages/Friends";
 import Marketplace from "@/pages/Marketplace";
+import CorrelativityMap from "@/pages/CorrelativityMap";
 
 const queryClient = new QueryClient();
 
@@ -98,20 +101,29 @@ const AppRoutes = () => (
       <Route path="/admin" element={<AdminPanel />} />
       <Route path="/bosque" element={<Forest />} />
       <Route path="/discord" element={<Discord />} />
+      <Route path="/mapa" element={<CorrelativityMap />} />
     </Route>
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
 
+import { PomodoroProvider } from "@/contexts/PomodoroContext";
+import { GlobalPomodoroWidget } from "@/components/pomodoro/GlobalPomodoroWidget";
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <PomodoroProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <DiscordVoiceProvider>
+              <AppRoutes />
+              <GlobalDiscordVoiceWidget />
+            </DiscordVoiceProvider>
+          </BrowserRouter>
+        </PomodoroProvider>
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>

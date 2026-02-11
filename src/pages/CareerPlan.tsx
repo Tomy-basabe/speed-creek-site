@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Filter, GraduationCap, Search, Plus, Loader2, Zap } from "lucide-react";
 import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { SubjectStatusModal } from "@/components/subjects/SubjectStatusModal";
@@ -16,23 +17,24 @@ const statusFilters = [
 ];
 
 export default function CareerPlan() {
-  const { 
-    subjects, 
+  const navigate = useNavigate();
+  const {
+    subjects,
     rawSubjects,
-    loading, 
+    loading,
     updateSubjectStatus,
     updatePartialGrades,
     createSubject,
     updateSubjectDependencies,
     deleteSubject,
     initializeDefaultStatuses,
-    getYears 
+    getYears
   } = useSubjects();
-  
+
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  
+
   // Modals
   const [selectedSubject, setSelectedSubject] = useState<SubjectWithStatus | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -41,37 +43,64 @@ export default function CareerPlan() {
 
   const years = getYears();
 
-  const filteredSubjects = subjects.filter((subject) => {
-    const matchesYear = selectedYear === null || subject.año === selectedYear;
-    const matchesStatus = selectedStatus === "all" || subject.status === selectedStatus;
-    const matchesSearch = subject.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          subject.codigo.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesYear && matchesStatus && matchesSearch;
-  });
+  // Memoize filtered subjects — only recalculates when filters or data change
+  const filteredSubjects = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    return subjects.filter((subject) => {
+      const matchesYear = selectedYear === null || subject.año === selectedYear;
+      const matchesStatus = selectedStatus === "all" || subject.status === selectedStatus;
+      const matchesSearch = !query ||
+        subject.nombre.toLowerCase().includes(query) ||
+        subject.codigo.toLowerCase().includes(query);
+      return matchesYear && matchesStatus && matchesSearch;
+    });
+  }, [subjects, selectedYear, selectedStatus, searchQuery]);
 
-  const subjectsByYear = years.map((year) => ({
-    year,
-    subjects: filteredSubjects.filter((s) => s.año === year),
-  }));
+  // Memoize subjects grouped by year
+  const subjectsByYear = useMemo(() => {
+    return years.map((year) => ({
+      year,
+      subjects: filteredSubjects.filter((s) => s.año === year),
+    }));
+  }, [years, filteredSubjects]);
 
-  const stats = {
+  // Memoize stats
+  const stats = useMemo(() => ({
     total: subjects.length,
     aprobadas: subjects.filter((s) => s.status === "aprobada").length,
     regulares: subjects.filter((s) => s.status === "regular").length,
     cursables: subjects.filter((s) => s.status === "cursable").length,
     bloqueadas: subjects.filter((s) => s.status === "bloqueada").length,
-  };
+  }), [subjects]);
 
-  const handleSubjectClick = (subject: SubjectWithStatus) => {
+  const handleSubjectClick = useCallback((subject: SubjectWithStatus) => {
     setSelectedSubject(subject);
     setShowStatusModal(true);
-  };
+  }, []);
 
-  const handleEditDependencies = (subject: SubjectWithStatus) => {
+  const handleEditDependencies = useCallback((subject: SubjectWithStatus) => {
     setSelectedSubject(subject);
     setShowStatusModal(false);
     setShowDepsModal(true);
-  };
+  }, []);
+
+  const handleCloseStatusModal = useCallback(() => {
+    setShowStatusModal(false);
+    setSelectedSubject(null);
+  }, []);
+
+  const handleCloseAddModal = useCallback(() => {
+    setShowAddModal(false);
+  }, []);
+
+  const handleCloseDepsModal = useCallback(() => {
+    setShowDepsModal(false);
+    setSelectedSubject(null);
+  }, []);
+
+  const handleOpenAddModal = useCallback(() => {
+    setShowAddModal(true);
+  }, []);
 
   if (loading) {
     return (
@@ -98,11 +127,18 @@ export default function CareerPlan() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAddModal}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-neon-cyan to-neon-purple text-background font-medium hover:opacity-90 transition-all"
           >
             <Plus className="w-4 h-4" />
             Agregar Materia
+          </button>
+          <button
+            onClick={() => navigate("/mapa")}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-secondary/50 border border-border hover:bg-secondary transition-all text-foreground font-medium"
+          >
+            <Zap className="w-4 h-4 text-neon-gold" />
+            Ver Mapa
           </button>
           <div className="card-gamer rounded-lg px-3 py-1.5 flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-neon-gold" />
@@ -256,7 +292,7 @@ export default function CareerPlan() {
           <GraduationCap className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
           <p className="text-muted-foreground mb-4">No hay materias cargadas todavía</p>
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAddModal}
             className="px-6 py-3 rounded-xl bg-gradient-to-r from-neon-cyan to-neon-purple text-background font-medium hover:opacity-90 transition-all"
           >
             Agregar tu primera materia
@@ -275,10 +311,7 @@ export default function CareerPlan() {
       <SubjectStatusModal
         subject={selectedSubject}
         open={showStatusModal}
-        onClose={() => {
-          setShowStatusModal(false);
-          setSelectedSubject(null);
-        }}
+        onClose={handleCloseStatusModal}
         onUpdate={updateSubjectStatus}
         onUpdatePartialGrades={updatePartialGrades}
         onEditDependencies={handleEditDependencies}
@@ -287,7 +320,7 @@ export default function CareerPlan() {
 
       <AddSubjectModal
         open={showAddModal}
-        onClose={() => setShowAddModal(false)}
+        onClose={handleCloseAddModal}
         onSubmit={createSubject}
         existingSubjects={rawSubjects}
         years={years}
@@ -296,13 +329,11 @@ export default function CareerPlan() {
       <EditDependenciesModal
         subject={selectedSubject}
         open={showDepsModal}
-        onClose={() => {
-          setShowDepsModal(false);
-          setSelectedSubject(null);
-        }}
+        onClose={handleCloseDepsModal}
         onUpdate={updateSubjectDependencies}
         allSubjects={rawSubjects}
       />
     </div>
   );
 }
+

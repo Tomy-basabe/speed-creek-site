@@ -29,13 +29,13 @@ export function useNotionDocuments() {
 
   const fetchDocuments = useCallback(async () => {
     if (!user) return;
-    
+
     setLoading(true);
     const { data, error } = await supabase
       .from("notion_documents")
       .select("*")
       .order("updated_at", { ascending: false });
-    
+
     if (error) {
       console.error("Error fetching documents:", error);
       toast.error("Error al cargar documentos");
@@ -43,13 +43,13 @@ export function useNotionDocuments() {
       // Fetch subjects for each document
       const subjectIds = [...new Set(data.filter(d => d.subject_id).map(d => d.subject_id))] as string[];
       let subjectsMap: Record<string, { nombre: string; codigo: string; year: number }> = {};
-      
+
       if (subjectIds.length > 0) {
         const { data: subjectsData } = await supabase
           .from("subjects")
           .select("id, nombre, codigo, año")
           .in("id", subjectIds);
-        
+
         if (subjectsData) {
           subjectsMap = (subjectsData as any[]).reduce((acc, s) => {
             acc[s.id] = { nombre: s.nombre, codigo: s.codigo, year: s.año };
@@ -62,7 +62,7 @@ export function useNotionDocuments() {
         ...d,
         subject: d.subject_id ? subjectsMap[d.subject_id] : undefined,
       })) as NotionDocument[];
-      
+
       setDocuments(mapped);
     }
     setLoading(false);
@@ -107,17 +107,17 @@ export function useNotionDocuments() {
       year: (subjectData as any).año
     } : undefined;
 
-    const newDoc = { 
-      ...data, 
+    const newDoc = {
+      ...data,
       subject: subjectInfo
     } as NotionDocument;
-    
+
     setDocuments(prev => [newDoc, ...prev]);
     return newDoc;
   };
 
   const updateDocument = async (
-    id: string, 
+    id: string,
     updates: Partial<Pick<NotionDocument, "titulo" | "contenido" | "emoji" | "cover_url" | "is_favorite" | "total_time_seconds">>
   ) => {
     const { error } = await supabase
@@ -130,7 +130,7 @@ export function useNotionDocuments() {
       return false;
     }
 
-    setDocuments(prev => 
+    setDocuments(prev =>
       prev.map(doc => doc.id === id ? { ...doc, ...updates } : doc)
     );
     return true;
@@ -174,8 +174,9 @@ export function useNotionDocuments() {
           user_id: user.id,
           subject_id: subjectId,
           duracion_segundos: seconds,
-          tipo: "notion",
+          tipo: "estudio",
           completada: true,
+          fecha: new Date().toISOString().split('T')[0],
         });
     } catch (error) {
       console.error("Error saving notion study session:", error);

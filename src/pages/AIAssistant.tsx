@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Sparkles, BookOpen, FileQuestion, Calendar, RotateCcw } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Bot, User, Sparkles, BookOpen, FileQuestion, Calendar, Menu, Mic, X, Paperclip, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { useAIPersonality, AI_PERSONALITIES } from "@/hooks/useAIPersonality";
-import { PersonalitySelector } from "@/components/ai/PersonalitySelector";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
+import { useAIPersonas, AIPersona, AIChatMessage } from "@/hooks/useAIPersonas";
+import { PersonaSidebar } from "@/components/ai/PersonaSidebar";
+import { PersonaOnboarding } from "@/components/ai/PersonaOnboarding";
+import { Button } from "@/components/ui/button";
 
-interface Message {
+interface DisplayMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -22,293 +24,485 @@ const quickActions = [
   { id: "progress", label: "Mi progreso", icon: Sparkles, prompt: "Analizá mi progreso académico y dame recomendaciones" },
 ];
 
-function getInitialMessage(personalityId: string): Message {
-  const personality = AI_PERSONALITIES.find(p => p.id === personalityId);
-  
-  const greetings: Record<string, string> = {
-    motivador: "¡Hola campeón! 👋🌟 Soy **T.A.B.E. IA**, tu coach académico personal. ¡Estoy acá para ayudarte a alcanzar tus metas!\n\n• **Explicaciones** claras de temas difíciles\n• **Simulacros** para que llegues preparado\n• **Planes de estudio** a tu medida\n• **Agendar eventos** en tu calendario 📅\n\n¡Vamos a romperla juntos! 💪 ¿En qué te puedo ayudar hoy?",
-    
-    exigente: "Buenas. 📚 Soy **T.A.B.E. IA**. Esperás aprobar, ¿no? Entonces vamos a trabajar en serio.\n\n• Te explico temas, pero vas a tener que pensar\n• Simulacros exigentes como los reales\n• Planes de estudio sin excusas\n• Agendo tus compromisos académicos\n\nNo voy a aceptar respuestas mediocres. ¿Empezamos?",
-    
-    debatidor: "Hola. ⚔️ Soy **T.A.B.E. IA**, y mi trabajo es hacerte pensar.\n\n• Te explico temas... pero vas a tener que defenderlos\n• Simulacros donde cuestiono cada respuesta\n• Planes de estudio que vamos a debatir\n• Y sí, también agendo eventos\n\nSi tu razonamiento es débil, te lo voy a hacer ver. ¿Estás listo para defender tus ideas?",
-    
-    profe_injusto: "Llegaste. 👹 Soy **T.A.B.E. IA**, el profe más exigente que vas a tener.\n\n• Te enseño, pero nunca estoy 100% satisfecho\n• Mis simulacros son más duros que cualquier cátedra\n• Si aprobás conmigo, el final real es un paseo\n\nAclaración: soy injusto porque te preparo para lo peor. ¿Bancás la exigencia?",
-    
-    te_van_a_bochar: "Sentate. 💀 Soy **T.A.B.E. IA** en modo crisis.\n\nVoy a ser directo: tenés materias pendientes, exámenes cerca, y quizás no estás tan preparado como creés.\n\n• Te muestro la realidad de tu preparación\n• Sin filtros, sin excusas\n• Pero después de la verdad cruda, te doy un plan\n\n¿Querés saber dónde estás parado realmente? Preguntame por tu progreso.",
-  };
-
+function getGreeting(persona: AIPersona): DisplayMessage {
   return {
-    id: "1",
+    id: "init",
     role: "assistant",
-    content: greetings[personalityId] || greetings.motivador,
+    content: `¡Hola! 👋 Soy **${persona.name}**, tu asistente académico personal.\n\n¿En qué te puedo ayudar hoy?`,
     timestamp: new Date(),
   };
 }
 
 export default function AIAssistant() {
   const { user } = useAuth();
-  const { personality, setPersonality, currentConfig } = useAIPersonality();
   const { isStreaming, streamMessage } = useStreamingChat();
-  const [messages, setMessages] = useState<Message[]>([getInitialMessage(personality)]);
-  const [inputValue, setInputValue] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const {
+    personas,
+    activePersona,
+    sessions,
+    loading,
+    switchPersona,
+    createPersona,
+    deletePersona,
+    loadSessions,
+    createSession,
+    deleteSession,
+    loadMessages,
+    saveMessage,
+  } = useAIPersonas();
 
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const currentSessionRef = useRef<string | null>(null);
+
+  // Load sessions when persona changes
+  useEffect(() => {
+    if (activePersona) {
+      loadSessions(activePersona.id);
+      setCurrentSessionId(null);
+      currentSessionRef.current = null;
+      setMessages([getGreeting(activePersona)]);
+    }
+  }, [activePersona?.id, loadSessions]);
+
+  // Scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  useEffect(() => { scrollToBottom(); }, [messages, isStreaming]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Reset chat when personality changes
-  const handlePersonalityChange = (newPersonality: typeof personality) => {
-    setPersonality(newPersonality);
-    setMessages([getInitialMessage(newPersonality)]);
-    toast.success(`Modo ${AI_PERSONALITIES.find(p => p.id === newPersonality)?.name} activado`);
+  // ---- Persona actions ----
+  const handleSelectPersona = (persona: AIPersona) => {
+    switchPersona(persona);
   };
 
-  const handleResetChat = () => {
-    setMessages([getInitialMessage(personality)]);
-    toast.success("Chat reiniciado");
+  const handleCreatePersona = async (data: {
+    name: string;
+    avatar_emoji: string;
+    description: string;
+    personality_prompt: string;
+  }) => {
+    const persona = await createPersona(data);
+    if (persona) {
+      toast.success(`${data.avatar_emoji} ${data.name} creada`);
+      setShowOnboarding(false);
+    } else {
+      toast.error("Error al crear la IA");
+    }
   };
 
+  const handleDeletePersona = async (id: string) => {
+    const persona = personas.find((p) => p.id === id);
+    const ok = await deletePersona(id);
+    if (ok) {
+      toast.success(`${persona?.name || "IA"} eliminada`);
+    }
+  };
+
+  // ---- Session actions ----
+  const handleNewChat = () => {
+    setCurrentSessionId(null);
+    currentSessionRef.current = null;
+    if (activePersona) {
+      setMessages([getGreeting(activePersona)]);
+    }
+  };
+
+  const handleSelectSession = async (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    currentSessionRef.current = sessionId;
+    const msgs = await loadMessages(sessionId);
+    if (msgs.length > 0) {
+      setMessages(
+        msgs.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.created_at),
+        }))
+      );
+    }
+    if (window.innerWidth < 768) setIsSidebarOpen(false);
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    const ok = await deleteSession(sessionId);
+    if (ok && currentSessionRef.current === sessionId) {
+      handleNewChat();
+    }
+  };
+
+  // ---- File upload ----
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploading(true);
+      if (file.type === "application/pdf") {
+        const { extractTextFromPdf } = await import("@/lib/pdf-utils");
+        const text = await extractTextFromPdf(file);
+        setInputValue((prev) => `${prev ? prev + "\n\n" : ""}📄 **Contenido de ${file.name}:**\n${text}`);
+        toast.success("PDF procesado");
+      } else if (file.type === "text/plain" || file.name.endsWith(".md")) {
+        const text = await file.text();
+        setInputValue((prev) => `${prev ? prev + "\n\n" : ""}📄 **Contenido de ${file.name}:**\n${text}`);
+        toast.success("Archivo procesado");
+      } else {
+        toast.error("Formato no soportado. Usa PDF o TXT.");
+      }
+    } catch {
+      toast.error("Error al leer el archivo.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // ---- Send message ----
   const handleSend = async () => {
-    if (!inputValue.trim() || isStreaming || !user) return;
+    if (!inputValue.trim() || isStreaming || !user || !activePersona) return;
 
-    const userMessage: Message = {
+    const userMessage: DisplayMessage = {
       id: Date.now().toString(),
       role: "user",
       content: inputValue,
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInputValue("");
 
-    const conversationHistory = [...messages, userMessage].map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Create or reuse session
+    let sessionId = currentSessionRef.current;
+    if (!sessionId) {
+      const title = inputValue.slice(0, 40) + (inputValue.length > 40 ? "..." : "");
+      const session = await createSession(activePersona.id, title);
+      if (!session) {
+        toast.error("Error al crear la sesión");
+        return;
+      }
+      sessionId = session.id;
+      currentSessionRef.current = sessionId;
+      setCurrentSessionId(sessionId);
+
+      // Save any initial messages that are real (skip the greeting)
+    }
+
+    // Save user message to DB
+    await saveMessage(sessionId, "user", inputValue);
+
+    // Prepare conversation for the AI
+    const conversationHistory = newMessages
+      .filter((m) => m.id !== "init")
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const assistantMsgId = (Date.now() + 1).toString();
-    let assistantContent = "";
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantMsgId, role: "assistant", content: "", timestamp: new Date() },
+    ]);
 
-    // Create placeholder message for streaming
-    setMessages(prev => [...prev, {
-      id: assistantMsgId,
-      role: "assistant",
-      content: "",
-      timestamp: new Date(),
-    }]);
+    let fullContent = "";
 
     streamMessage(
-      conversationHistory.slice(1),
-      personality,
-      // onDelta - update message as tokens arrive
+      conversationHistory,
+      activePersona.id, // pass persona ID instead of personality string
       (delta) => {
-        assistantContent += delta;
-        setMessages(prev => 
-          prev.map(m => 
-            m.id === assistantMsgId 
-              ? { ...m, content: assistantContent }
-              : m
+        fullContent += delta;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, content: fullContent } : m
           )
         );
       },
-      // onComplete - handle tool results
-      (result) => {
-        if (result.event_created) {
-          toast.success("Evento agregado al calendario", {
-            action: {
-              label: "Ver calendario",
-              onClick: () => window.location.href = "/calendario",
-            },
-          });
-        }
+      async (result) => {
+        if (result.event_created) toast.success("Evento agregado");
+        if (result.flashcards_created) toast.success("Flashcards creadas");
 
-        if (result.flashcards_created) {
-          toast.success(`¡${result.flashcards_created.cards_count} flashcards creadas!`, {
-            action: {
-              label: "Ver mazos",
-              onClick: () => window.location.href = "/flashcards",
-            },
-          });
+        // Save assistant response to DB
+        if (sessionId && fullContent) {
+          await saveMessage(sessionId, "assistant", fullContent);
         }
       },
-      // onError
       (error) => {
-        console.error("AI error:", error);
         toast.error(error.message);
-        setMessages(prev => 
-          prev.map(m => 
-            m.id === assistantMsgId 
-              ? { ...m, content: `Lo siento, hubo un error: ${error.message}` }
-              : m
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, content: `Error: ${error.message}` } : m
           )
         );
       }
     );
   };
 
-  const handleQuickAction = (prompt: string) => {
-    setInputValue(prompt);
+  const handleQuickAction = (prompt: string) => setInputValue(prompt);
+
+  const startVoiceInput = () => {
+    try {
+      // @ts-ignore
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { toast.error("No soportado"); return; }
+      const recognition = new SpeechRecognition();
+      recognition.lang = "es-AR";
+      recognition.interimResults = false;
+      toast.info("Escuchando... 🎙️");
+      recognition.onresult = (e: any) => {
+        const t = e.results[0][0].transcript;
+        if (t) { setInputValue((prev) => prev + (prev ? " " : "") + t); toast.success("Escuchado"); }
+      };
+      recognition.start();
+    } catch {
+      toast.error("Error al iniciar voz");
+    }
   };
 
   const renderContent = (content: string) => {
-    return content
-      .split("\n")
-      .map((line, i) => {
-        let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
-        if (processed.startsWith("• ")) {
-          processed = `<span class="flex gap-2"><span>•</span><span>${processed.slice(2)}</span></span>`;
-        }
-        return <div key={i} dangerouslySetInnerHTML={{ __html: processed }} />;
-      });
+    if (!content)
+      return (
+        <div className="flex items-center gap-2 text-muted-foreground/80 italic animate-pulse">
+          <Sparkles className="w-4 h-4 text-neon-cyan" />
+          <span className="text-neon-cyan/80">Pensando...</span>
+        </div>
+      );
+    return content.split("\n").map((line, i) => {
+      let p = line
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.*?)\*/g, "<em>$1</em>");
+      if (p.startsWith("• "))
+        p = `<span class="flex gap-2"><span>•</span><span>${p.slice(2)}</span></span>`;
+      return <div key={i} dangerouslySetInnerHTML={{ __html: p }} />;
+    });
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <span className="text-sm text-muted-foreground">Cargando asistente...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-[calc(100vh-4rem)] lg:h-screen flex flex-col p-4 lg:p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="font-display text-2xl lg:text-3xl font-bold gradient-text">
-            Asistente IA
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            {currentConfig.emoji} {currentConfig.description}
-          </p>
+    <div className="flex h-screen bg-background overflow-hidden relative">
+      <PersonaSidebar
+        personas={personas}
+        activePersona={activePersona}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectPersona={handleSelectPersona}
+        onCreatePersona={() => setShowOnboarding(true)}
+        onDeletePersona={handleDeletePersona}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+        onDeleteSession={handleDeleteSession}
+        isOpen={isSidebarOpen}
+      />
+
+      {showOnboarding && (
+        <PersonaOnboarding
+          onComplete={handleCreatePersona}
+          onCancel={() => setShowOnboarding(false)}
+        />
+      )}
+
+      <div className="flex-1 flex flex-col h-full relative">
+        <div className="absolute left-4 top-4 z-50 md:hidden">
+          <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            {isSidebarOpen ? <X /> : <Menu />}
+          </Button>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleResetChat}
-            className="p-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
-            title="Reiniciar chat"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <PersonalitySelector
-            currentPersonality={personality}
-            onSelect={handlePersonalityChange}
-            disabled={isStreaming}
-          />
-          <div className="px-3 py-1.5 bg-neon-green/20 text-neon-green rounded-full text-xs font-medium flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-neon-green animate-pulse" />
-            Online
+
+        <div className="flex-1 overflow-y-auto scroll-smooth">
+          <div className="max-w-4xl mx-auto p-4 lg:p-8 space-y-6">
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h1 className="font-display text-2xl lg:text-3xl font-bold gradient-text flex items-center gap-3">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="hidden md:flex"
+                      onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    >
+                      <Menu className="w-5 h-5" />
+                    </Button>
+                    {activePersona?.avatar_emoji || "🤖"} {activePersona?.name || "Asistente IA"}
+                  </h1>
+                  {activePersona?.description && (
+                    <p className="text-muted-foreground text-sm mt-0.5 ml-12">
+                      {activePersona.description}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 self-end md:self-auto">
+                  <div className="px-3 py-1.5 bg-neon-green/10 text-neon-green rounded-full text-xs font-medium flex items-center gap-1 border border-neon-green/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-neon-green animate-pulse" />
+                    Online
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {messages.length <= 1 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                {quickActions.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.id}
+                      onClick={() => handleQuickAction(action.prompt)}
+                      className="flex flex-col items-center justify-center gap-2 p-3 bg-card hover:bg-accent/50 border border-border/50 rounded-xl transition-all text-center group"
+                    >
+                      <div className="p-2 rounded-full bg-primary/10 text-primary group-hover:scale-110 transition-transform">
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                        {action.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="space-y-6 pb-24 min-h-[300px]">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={cn(
+                    "flex gap-4 group",
+                    message.role === "user" ? "flex-row-reverse" : "flex-row"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm mt-1",
+                      message.role === "assistant"
+                        ? "bg-gradient-to-br from-neon-cyan to-neon-purple"
+                        : "bg-secondary text-foreground"
+                    )}
+                  >
+                    {message.role === "assistant" ? (
+                      <span className="text-sm">{activePersona?.avatar_emoji || "🤖"}</span>
+                    ) : (
+                      <User className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div
+                    className={cn(
+                      "max-w-[85%] lg:max-w-[75%] rounded-2xl px-5 py-4 shadow-sm overflow-hidden",
+                      message.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-tr-sm"
+                        : "bg-card border border-border/50 rounded-tl-sm"
+                    )}
+                  >
+                    <div className="text-sm space-y-2 leading-relaxed break-words">
+                      {renderContent(message.content)}
+                    </div>
+                    <div
+                      className={cn(
+                        "flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-50 transition-opacity text-[10px]",
+                        message.role === "user"
+                          ? "text-primary-foreground/70"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      <span>
+                        {new Date(message.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Quick Actions */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {quickActions.map((action) => {
-          const Icon = action.icon;
-          return (
-            <button
-              key={action.id}
-              onClick={() => handleQuickAction(action.prompt)}
-              className="flex items-center gap-2 px-3 py-2 bg-secondary rounded-lg text-sm hover:bg-secondary/80 transition-colors"
-            >
-              <Icon className="w-4 h-4 text-primary" />
-              {action.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Chat Container */}
-      <div className="flex-1 card-gamer rounded-xl flex flex-col overflow-hidden">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn(
-                "flex gap-3",
-                message.role === "user" ? "justify-end" : "justify-start"
-              )}
-            >
-              {message.role === "assistant" && (
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center flex-shrink-0">
-                  <Bot className="w-5 h-5 text-background" />
-                </div>
-              )}
-              <div
-                className={cn(
-                  "max-w-[80%] rounded-2xl px-4 py-3",
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-br-sm"
-                    : "bg-secondary rounded-bl-sm"
-                )}
-              >
-                <div className="text-sm space-y-1">
-                  {renderContent(message.content)}
-                </div>
-                <p className="text-xs opacity-50 mt-2">
-                  {message.timestamp.toLocaleTimeString("es-AR", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </p>
-              </div>
-              {message.role === "user" && (
-                <div className="w-8 h-8 rounded-lg bg-neon-gold/20 flex items-center justify-center flex-shrink-0">
-                  <User className="w-5 h-5 text-neon-gold" />
-                </div>
-              )}
-            </div>
-          ))}
-
-          {isStreaming && messages[messages.length - 1]?.content === "" && (
-            <div className="flex gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center">
-                <Bot className="w-5 h-5 text-background" />
-              </div>
-              <div className="bg-secondary rounded-2xl rounded-bl-sm px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="flex gap-1">
-                    <span className="w-2 h-2 rounded-full bg-neon-cyan animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-2 h-2 rounded-full bg-neon-cyan animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-2 h-2 rounded-full bg-neon-cyan animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </span>
-                  Escribiendo...
-                </div>
-              </div>
-            </div>
-          )}
-          
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input */}
-        <div className="p-4 border-t border-border">
-          <div className="flex gap-3">
+        <div className="p-4 lg:p-6 bg-gradient-to-t from-background via-background/95 to-transparent sticky bottom-0 z-20">
+          <div className="max-w-3xl mx-auto relative">
             <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Escribe tu pregunta o pedido..."
-              className="flex-1 px-4 py-3 bg-secondary rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              disabled={isStreaming}
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              accept=".pdf,.txt,.md"
             />
-            <button
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isStreaming}
-              className={cn(
-                "px-4 py-3 rounded-xl transition-all flex items-center gap-2",
-                inputValue.trim() && !isStreaming
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan"
-                  : "bg-secondary text-muted-foreground cursor-not-allowed"
-              )}
-            >
-              <Send className="w-5 h-5" />
-            </button>
+            <div className="absolute inset-0 bg-neon-cyan/5 blur-3xl -z-10 rounded-full opacity-20" />
+            <div className="flex gap-2 items-end bg-card/80 backdrop-blur-xl p-2 rounded-2xl border border-border/50 shadow-lg">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-primary mb-1"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || isStreaming}
+                title="Adjuntar PDF/Texto"
+              >
+                {isUploading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Paperclip className="w-5 h-5" />
+                )}
+              </Button>
+
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                placeholder={
+                  isUploading
+                    ? "Procesando archivo..."
+                    : `Preguntale a ${activePersona?.name || "tu IA"}...`
+                }
+                className="flex-1 px-4 py-3 bg-transparent border-none focus:outline-none text-sm placeholder:text-muted-foreground/50 max-h-32"
+                disabled={isStreaming || isUploading}
+              />
+
+              <div className="flex gap-1 pb-1 pr-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-primary transition-colors"
+                  onClick={startVoiceInput}
+                  title="Dictar por voz"
+                  disabled={isStreaming}
+                >
+                  <Mic className="w-5 h-5" />
+                </Button>
+                <Button
+                  onClick={handleSend}
+                  disabled={!inputValue.trim() || isStreaming}
+                  size="icon"
+                  className={cn(
+                    "rounded-xl transition-all duration-300",
+                    inputValue.trim() && !isStreaming
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(var(--primary),0.3)]"
+                      : "bg-secondary text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  <Send className="w-5 h-5" />
+                </Button>
+              </div>
+            </div>
+            <p className="text-[10px] text-center text-muted-foreground/50 mt-2">
+              {activePersona?.name || "T.A.B.E. IA"} puede cometer errores. El modo offline para archivos está activo.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            Podés pedirme simulacros, explicaciones, o que agende eventos. Ej: "Haceme un simulacro de final de Física"
-          </p>
         </div>
       </div>
     </div>

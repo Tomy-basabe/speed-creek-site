@@ -73,30 +73,33 @@ const ICE_SERVERS: RTCConfiguration = {
 export function useDiscord() {
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   // Server state
   const [servers, setServers] = useState<DiscordServer[]>([]);
   const [currentServer, setCurrentServer] = useState<DiscordServer | null>(null);
   const [members, setMembers] = useState<DiscordServerMember[]>([]);
   const [channels, setChannels] = useState<DiscordChannel[]>([]);
-  
+
   // Channel state
-  const [currentChannel, setCurrentChannel] = useState<DiscordChannel | null>(null);
+  const [currentChannel, setInternalCurrentChannel] = useState<DiscordChannel | null>(null);
   const [messages, setMessages] = useState<DiscordMessage[]>([]);
   const [voiceParticipants, setVoiceParticipants] = useState<DiscordVoiceParticipant[]>([]);
-  
+
   // WebRTC state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isDeafened, setIsDeafened] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
-  
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map()); // userId -> displayName
+  const [allVoiceParticipants, setAllVoiceParticipants] = useState<DiscordVoiceParticipant[]>([]); // All channels in server
+
   const [loading, setLoading] = useState(false);
   const [inVoiceChannel, setInVoiceChannel] = useState(false);
-  
+
   // Refs
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const signalingChannel = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -104,6 +107,8 @@ export function useDiscord() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null); // Keep reference for signaling handlers
+  const typingTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const typingChannel = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // Perfect Negotiation state (prevents offer glare)
   const negotiationStateRef = useRef<
@@ -134,66 +139,85 @@ export function useDiscord() {
     [user]
   );
 
-  // Fetch user's servers
+  // Fetch user's servers (only those where they are a member)
   const fetchServers = useCallback(async () => {
     if (!user) return;
-    
+
+    // First get the server IDs where the user is a member
+    const { data: memberRows, error: memberError } = await supabase
+      .from("discord_server_members")
+      .select("server_id")
+      .eq("user_id", user.id);
+
+    if (memberError) {
+      console.error("Error fetching server memberships:", memberError);
+      return;
+    }
+
+    if (!memberRows || memberRows.length === 0) {
+      setServers([]);
+      return;
+    }
+
+    const serverIds = memberRows.map(m => m.server_id);
+
     const { data, error } = await supabase
       .from("discord_servers")
       .select("*")
+      .in("id", serverIds)
       .order("created_at", { ascending: true });
-    
+
     if (error) {
       console.error("Error fetching servers:", error);
       return;
     }
-    
+
     setServers(data || []);
   }, [user]);
 
   // Fetch channels for current server
   const fetchChannels = useCallback(async () => {
     if (!currentServer) return;
-    
+
     const { data, error } = await supabase
       .from("discord_channels")
       .select("*")
       .eq("server_id", currentServer.id)
       .order("position", { ascending: true });
-    
+
     if (error) {
       console.error("Error fetching channels:", error);
       return;
     }
-    
+
     setChannels((data as DiscordChannel[]) || []);
   }, [currentServer]);
 
   // Fetch members for current server
   const fetchMembers = useCallback(async () => {
     if (!currentServer) return;
-    
+
     const { data, error } = await supabase
       .from("discord_server_members")
       .select("*")
       .eq("server_id", currentServer.id);
-    
+
     if (error) {
       console.error("Error fetching members:", error);
       return;
     }
-    
+
     // Fetch profiles using server member function (not friends-only)
     if (data && data.length > 0) {
       const userIds = data.map(m => m.user_id);
       const { data: profiles } = await supabase
         .rpc('get_server_member_profiles', { member_user_ids: userIds });
-      
+
       const membersWithProfiles = data.map(m => ({
         ...m,
         profile: profiles?.find((p: any) => p.user_id === m.user_id) || undefined
       }));
-      
+
       setMembers(membersWithProfiles);
     } else {
       setMembers([]);
@@ -203,30 +227,30 @@ export function useDiscord() {
   // Fetch messages for current text channel
   const fetchMessages = useCallback(async () => {
     if (!currentChannel || currentChannel.type !== "text") return;
-    
+
     const { data, error } = await supabase
       .from("discord_messages")
       .select("*")
       .eq("channel_id", currentChannel.id)
       .order("created_at", { ascending: true })
       .limit(100);
-    
+
     if (error) {
       console.error("Error fetching messages:", error);
       return;
     }
-    
+
     // Fetch profiles for messages
     if (data && data.length > 0) {
       const userIds = [...new Set(data.map(m => m.user_id))];
       const { data: profiles } = await supabase
         .rpc('get_server_member_profiles', { member_user_ids: userIds });
-      
+
       const messagesWithProfiles = data.map(m => ({
         ...m,
         profile: profiles?.find((p: any) => p.user_id === m.user_id) || undefined
       }));
-      
+
       setMessages(messagesWithProfiles);
     } else {
       setMessages([]);
@@ -236,38 +260,81 @@ export function useDiscord() {
   // Fetch voice participants for current voice channel
   const fetchVoiceParticipants = useCallback(async () => {
     if (!currentChannel || currentChannel.type !== "voice") return;
-    
+
     const { data, error } = await supabase
       .from("discord_voice_participants")
       .select("*")
       .eq("channel_id", currentChannel.id);
-    
+
     if (error) {
       console.error("Error fetching voice participants:", error);
       return;
     }
-    
+
     if (data && data.length > 0) {
       const userIds = data.map(p => p.user_id);
       const { data: profiles } = await supabase
         .rpc('get_server_member_profiles', { member_user_ids: userIds });
-      
+
       const participantsWithProfiles = data.map(p => ({
         ...p,
         profile: profiles?.find((pr: any) => pr.user_id === p.user_id) || undefined
       }));
-      
+
       setVoiceParticipants(participantsWithProfiles as DiscordVoiceParticipant[]);
     } else {
       setVoiceParticipants([]);
     }
   }, [currentChannel]);
 
+  // Fetch ALL voice participants for the entire server (for sidebar display)
+  const fetchAllVoiceParticipants = useCallback(async () => {
+    if (!currentServer) return;
+
+    // Get all channel IDs for this server
+    const { data: serverChannels } = await supabase
+      .from("discord_channels")
+      .select("id")
+      .eq("server_id", currentServer.id)
+      .eq("type", "voice");
+
+    if (!serverChannels || serverChannels.length === 0) {
+      setAllVoiceParticipants([]);
+      return;
+    }
+
+    const channelIds = serverChannels.map(c => c.id);
+    const { data, error } = await supabase
+      .from("discord_voice_participants")
+      .select("*")
+      .in("channel_id", channelIds);
+
+    if (error) {
+      console.error("Error fetching all voice participants:", error);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      const userIds = [...new Set(data.map(p => p.user_id))];
+      const { data: profiles } = await supabase
+        .rpc('get_server_member_profiles', { member_user_ids: userIds });
+
+      const participantsWithProfiles = data.map(p => ({
+        ...p,
+        profile: profiles?.find((pr: any) => pr.user_id === p.user_id) || undefined
+      }));
+
+      setAllVoiceParticipants(participantsWithProfiles as DiscordVoiceParticipant[]);
+    } else {
+      setAllVoiceParticipants([]);
+    }
+  }, [currentServer]);
+
   // Create a new server
   const createServer = async (name: string) => {
     if (!user) return null;
     setLoading(true);
-    
+
     try {
       // Create server
       const { data: server, error: serverError } = await supabase
@@ -275,18 +342,18 @@ export function useDiscord() {
         .insert({ name, owner_id: user.id })
         .select()
         .single();
-      
+
       if (serverError) throw serverError;
-      
+
       // Add owner as member
       await supabase
         .from("discord_server_members")
-        .insert({ 
-          server_id: server.id, 
-          user_id: user.id, 
-          role: "owner" 
+        .insert({
+          server_id: server.id,
+          user_id: user.id,
+          role: "owner"
         });
-      
+
       // Create default channels
       await supabase
         .from("discord_channels")
@@ -294,7 +361,7 @@ export function useDiscord() {
           { server_id: server.id, name: "general", type: "text", position: 0 },
           { server_id: server.id, name: "General", type: "voice", position: 1 },
         ]);
-      
+
       toast({ title: "Servidor creado", description: `${name} está listo` });
       await fetchServers();
       return server;
@@ -307,24 +374,86 @@ export function useDiscord() {
     }
   };
 
+  // Delete a server
+  const deleteServer = async (serverId: string) => {
+    if (!user) return;
+
+    try {
+      // First verify ownership
+      const serverToDelete = servers.find(s => s.id === serverId);
+      if (!serverToDelete) return;
+
+      // In a real app with RLS, the DB would prevent non-owners from deleting
+      // But we can check locally too for better UX
+      // (assuming created_by or owner_id field exists - based on createServer it's owner_id)
+
+      const { error } = await supabase
+        .from("discord_servers")
+        .delete()
+        .eq("id", serverId);
+
+      if (error) throw error;
+
+      toast({ title: "Servidor eliminado", description: "El servidor ha sido eliminado permanentemente" });
+
+      // If current server was deleted, clear selection
+      if (currentServer?.id === serverId) {
+        setCurrentServer(null);
+        setInternalCurrentChannel(null);
+      }
+
+      await fetchServers();
+    } catch (error) {
+      console.error("Error deleting server:", error);
+      toast({ title: "Error", description: "No se pudo eliminar el servidor", variant: "destructive" });
+    }
+  };
+
+  // Leave a server
+  const leaveServer = async (serverId: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from("discord_server_members")
+        .delete()
+        .eq("server_id", serverId)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      toast({ title: "Has salido del servidor" });
+
+      if (currentServer?.id === serverId) {
+        setCurrentServer(null);
+        setInternalCurrentChannel(null);
+      }
+
+      await fetchServers();
+    } catch (error) {
+      console.error("Error leaving server:", error);
+      toast({ title: "Error", description: "No se pudo salir del servidor", variant: "destructive" });
+    }
+  };
+
   // Create a channel
   const createChannel = async (name: string, type: "text" | "voice") => {
     if (!user || !currentServer) return null;
-    
+
     try {
       const { data, error } = await supabase
         .from("discord_channels")
-        .insert({ 
-          server_id: currentServer.id, 
-          name, 
+        .insert({
+          server_id: currentServer.id,
+          name,
           type,
-          position: channels.length 
+          position: channels.length
         })
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       toast({ title: "Canal creado", description: `#${name}` });
       await fetchChannels();
       return data;
@@ -342,11 +471,14 @@ export function useDiscord() {
         .from("discord_channels")
         .delete()
         .eq("id", channelId);
-      
+
       if (error) throw error;
-      
+
       if (currentChannel?.id === channelId) {
-        setCurrentChannel(null);
+        if (currentChannel.type === 'voice') {
+          await leaveVoiceChannel();
+        }
+        setInternalCurrentChannel(null);
       }
       await fetchChannels();
     } catch (error) {
@@ -358,14 +490,14 @@ export function useDiscord() {
   // Send a message
   const sendMessage = async (content: string) => {
     if (!user || !currentChannel || currentChannel.type !== "text") return;
-    
+
     try {
       await supabase
         .from("discord_messages")
-        .insert({ 
-          channel_id: currentChannel.id, 
-          user_id: user.id, 
-          content 
+        .insert({
+          channel_id: currentChannel.id,
+          user_id: user.id,
+          content
         });
     } catch (error) {
       console.error("Error sending message:", error);
@@ -375,18 +507,18 @@ export function useDiscord() {
   // Invite user to server
   const inviteUser = async (userId: string) => {
     if (!currentServer) return;
-    
+
     try {
       const { error } = await supabase
         .from("discord_server_members")
-        .insert({ 
-          server_id: currentServer.id, 
-          user_id: userId, 
-          role: "member" 
+        .insert({
+          server_id: currentServer.id,
+          user_id: userId,
+          role: "member"
         });
-      
+
       if (error) throw error;
-      
+
       toast({ title: "Usuario invitado", description: "Se unirá al servidor" });
       await fetchMembers();
     } catch (error) {
@@ -396,26 +528,37 @@ export function useDiscord() {
   };
 
   // Voice activity detection
+  // Use a ref to track speaking state without re-triggering effect
+  const isSpeakingRef = useRef(false);
+
   const setupVoiceActivityDetection = useCallback((stream: MediaStream) => {
     try {
-      audioContext.current = new AudioContext();
-      const source = audioContext.current.createMediaStreamSource(stream);
-      const analyser = audioContext.current.createAnalyser();
+      if (audioContext.current) {
+        try { audioContext.current.close(); } catch { }
+      }
+
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContext.current = ctx;
+
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       source.connect(analyser);
       analyserRef.current = analyser;
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      
+
       const checkAudio = () => {
         if (!analyserRef.current) return;
-        
+
         analyserRef.current.getByteFrequencyData(dataArray);
         const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        const speaking = average > 30;
-        
-        if (speaking !== isSpeaking) {
+        const speaking = average > 15; // More sensitive threshold
+
+        if (speaking !== isSpeakingRef.current) {
+          isSpeakingRef.current = speaking;
           setIsSpeaking(speaking);
+
           // Update in database
           if (currentChannel && user) {
             supabase
@@ -423,18 +566,18 @@ export function useDiscord() {
               .update({ is_speaking: speaking })
               .eq("channel_id", currentChannel.id)
               .eq("user_id", user.id)
-              .then(() => {});
+              .then(() => { });
           }
         }
-        
+
         requestAnimationFrame(checkAudio);
       };
-      
+
       checkAudio();
     } catch (error) {
       console.error("Error setting up VAD:", error);
     }
-  }, [currentChannel, user, isSpeaking]);
+  }, [currentChannel, user]);
 
   // Join voice channel
   const joinVoiceChannel = async (channel: DiscordChannel) => {
@@ -508,7 +651,14 @@ export function useDiscord() {
 
       console.log("[Discord][Diag] Existing participants:", existingParticipants?.length || 0);
 
-      // Add to participants
+      // Clean up any stale voice participant records from previous sessions
+      // (handles crashes, tab closures, navigating away without disconnecting)
+      await supabase
+        .from("discord_voice_participants")
+        .delete()
+        .eq("user_id", user.id);
+
+      // Add to participants (now safe - no duplicate key possible)
       const { error: insertError } = await supabase
         .from("discord_voice_participants")
         .insert({
@@ -523,7 +673,7 @@ export function useDiscord() {
         throw insertError;
       }
 
-      setCurrentChannel(channel);
+      setInternalCurrentChannel(channel);
       setInVoiceChannel(true);
 
       // Setup signaling channel
@@ -559,7 +709,7 @@ export function useDiscord() {
       // If we partially created something, clean up local resources
       try {
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
-      } catch {}
+      } catch { }
       localStreamRef.current = null;
       setLocalStream(null);
       setInVoiceChannel(false);
@@ -613,34 +763,34 @@ export function useDiscord() {
   // Setup WebRTC signaling
   const setupSignaling = async (channelId: string, stream: MediaStream) => {
     if (!user) return;
-    
+
     // Clean up existing channel first
     if (signalingChannel.current) {
       await supabase.removeChannel(signalingChannel.current);
       signalingChannel.current = null;
     }
-    
+
     const channel = supabase.channel(`voice:${channelId}`, {
       config: {
         broadcast: { self: false },
         presence: { key: user.id },
       },
     });
-    
+
     channel
       .on("broadcast", { event: "signal" }, async ({ payload }) => {
         const { type, from, to, data } = payload;
         if (to && to !== user.id) return;
-        
+
         // Use ref to get current stream (important for closures)
         const currentStream = localStreamRef.current;
         if (!currentStream) {
           console.warn("[Discord] No local stream available for signaling");
           return;
         }
-        
+
         console.log("[Discord] Received signal:", type, "from:", from);
-        
+
         if (type === "offer") {
           await handleOffer(from, data, currentStream);
         } else if (type === "answer") {
@@ -680,7 +830,7 @@ export function useDiscord() {
           await channel.track({ user_id: user.id });
         }
       });
-    
+
     signalingChannel.current = channel;
   };
 
@@ -783,13 +933,13 @@ export function useDiscord() {
     const pc = createPeerConnection(peerId, stream);
 
     const n = getNegotiationState(peerId);
-    
+
     try {
       n.makingOffer = true;
       await pc.setLocalDescription(await pc.createOffer());
       const offer = pc.localDescription;
       if (!offer) throw new Error("No localDescription after createOffer");
-      
+
       signalingChannel.current?.send({
         type: "broadcast",
         event: "signal",
@@ -814,7 +964,7 @@ export function useDiscord() {
     }
 
     const n = getNegotiationState(fromId);
-    
+
     try {
       const offerCollision = n.makingOffer || pc.signalingState !== "stable";
       n.ignoreOffer = !n.polite && offerCollision;
@@ -834,7 +984,7 @@ export function useDiscord() {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      
+
       signalingChannel.current?.send({
         type: "broadcast",
         event: "signal",
@@ -866,13 +1016,13 @@ export function useDiscord() {
 
   // Toggle audio
   const toggleAudio = async () => {
-   const stream = localStreamRef.current;
-   if (stream) {
-     const audioTrack = stream.getAudioTracks()[0];
+    const stream = localStreamRef.current;
+    if (stream) {
+      const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsAudioEnabled(audioTrack.enabled);
-        
+
         if (currentChannel && user) {
           await supabase
             .from("discord_voice_participants")
@@ -881,21 +1031,21 @@ export function useDiscord() {
             .eq("user_id", user.id);
         }
       }
-   } else {
-     console.error("[Discord] No local stream for audio toggle");
+    } else {
+      console.error("[Discord] No local stream for audio toggle");
     }
   };
 
   // Toggle video
   const toggleVideo = async () => {
-   if (!user || !currentChannel) return;
-   
-   const stream = localStreamRef.current;
-   if (!stream) {
-     console.error("[Discord] No local stream available for video toggle");
-     return;
-   }
-    
+    if (!user || !currentChannel) return;
+
+    const stream = localStreamRef.current;
+    if (!stream) {
+      console.error("[Discord] No local stream available for video toggle");
+      return;
+    }
+
     if (isVideoEnabled) {
       // === TURN OFF VIDEO ===
       // 1. Update React state FIRST (instant UI update for local tile)
@@ -991,15 +1141,15 @@ export function useDiscord() {
   // Start screen share
   const startScreenShare = async () => {
     if (!user || !currentChannel) return;
-    
+
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
       });
-      
+
       screenStreamRef.current = screenStream;
-      
+
       // Replace video track in all connections
       const videoTrack = screenStream.getVideoTracks()[0];
       peerConnections.current.forEach((pc) => {
@@ -1010,19 +1160,19 @@ export function useDiscord() {
           pc.addTrack(videoTrack, localStream!);
         }
       });
-      
+
       videoTrack.onended = () => {
         stopScreenShare();
       };
-      
+
       setIsScreenSharing(true);
-      
+
       await supabase
         .from("discord_voice_participants")
         .update({ is_screen_sharing: true })
         .eq("channel_id", currentChannel.id)
         .eq("user_id", user.id);
-        
+
     } catch (error) {
       console.error("Error starting screen share:", error);
     }
@@ -1031,17 +1181,64 @@ export function useDiscord() {
   // Stop screen share
   const stopScreenShare = async () => {
     if (!user || !currentChannel) return;
-    
+
     screenStreamRef.current?.getTracks().forEach(track => track.stop());
     screenStreamRef.current = null;
     setIsScreenSharing(false);
-    
+
     await supabase
       .from("discord_voice_participants")
       .update({ is_screen_sharing: false })
       .eq("channel_id", currentChannel.id)
       .eq("user_id", user.id);
   };
+
+  // Toggle deafen
+  const toggleDeafen = () => {
+    const newDeafened = !isDeafened;
+    setIsDeafened(newDeafened);
+
+    // Mute/unmute all remote audio
+    remoteStreams.forEach((stream) => {
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !newDeafened;
+      });
+    });
+
+    // If deafening, also mute mic
+    if (newDeafened && isAudioEnabled) {
+      const stream = localStreamRef.current;
+      if (stream) {
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          audioTrack.enabled = false;
+          setIsAudioEnabled(false);
+        }
+      }
+      if (currentChannel && user) {
+        supabase
+          .from("discord_voice_participants")
+          .update({ is_muted: true })
+          .eq("channel_id", currentChannel.id)
+          .eq("user_id", user.id)
+          .then(() => { });
+      }
+    }
+  };
+
+  // Typing indicator
+  const sendTypingIndicator = useCallback(() => {
+    if (!currentChannel || currentChannel.type !== "text" || !user) return;
+
+    typingChannel.current?.send({
+      type: "broadcast",
+      event: "typing",
+      payload: {
+        user_id: user.id,
+        display_name: "Usuario",
+      },
+    });
+  }, [currentChannel, user]);
 
   // Effects
   useEffect(() => {
@@ -1052,13 +1249,34 @@ export function useDiscord() {
     if (currentServer) {
       fetchChannels();
       fetchMembers();
+      fetchAllVoiceParticipants();
+
+      // Subscribe to voice participant changes for ALL channels in server
+      const allVoiceSub = supabase
+        .channel(`all-voice:${currentServer.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "discord_voice_participants",
+          },
+          () => {
+            fetchAllVoiceParticipants();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(allVoiceSub);
+      };
     }
-  }, [currentServer, fetchChannels, fetchMembers]);
+  }, [currentServer, fetchChannels, fetchMembers, fetchAllVoiceParticipants]);
 
   useEffect(() => {
     if (currentChannel?.type === "text") {
       fetchMessages();
-      
+
       // Subscribe to new messages
       const channel = supabase
         .channel(`messages:${currentChannel.id}`)
@@ -1075,17 +1293,50 @@ export function useDiscord() {
           }
         )
         .subscribe();
-      
+
+      // Setup typing indicator channel
+      const tCh = supabase.channel(`typing:${currentChannel.id}`);
+      tCh.on("broadcast", { event: "typing" }, ({ payload }) => {
+        if (payload.user_id === user?.id) return;
+        const displayName = payload.display_name || "Alguien";
+        setTypingUsers(prev => {
+          const updated = new Map(prev);
+          updated.set(payload.user_id, displayName);
+          return updated;
+        });
+        // Clear after 3 seconds
+        const existingTimeout = typingTimeouts.current.get(payload.user_id);
+        if (existingTimeout) clearTimeout(existingTimeout);
+        const timeout = setTimeout(() => {
+          setTypingUsers(prev => {
+            const updated = new Map(prev);
+            updated.delete(payload.user_id);
+            return updated;
+          });
+          typingTimeouts.current.delete(payload.user_id);
+        }, 3000);
+        typingTimeouts.current.set(payload.user_id, timeout);
+      }).subscribe();
+      typingChannel.current = tCh;
+
       return () => {
         supabase.removeChannel(channel);
+        if (typingChannel.current) {
+          supabase.removeChannel(typingChannel.current);
+          typingChannel.current = null;
+        }
+        // Clear typing timeouts
+        typingTimeouts.current.forEach(t => clearTimeout(t));
+        typingTimeouts.current.clear();
+        setTypingUsers(new Map());
       };
     }
-  }, [currentChannel, fetchMessages]);
+  }, [currentChannel, fetchMessages, user]);
 
   useEffect(() => {
     if (currentChannel?.type === "voice") {
       fetchVoiceParticipants();
-      
+
       // Subscribe to voice participant changes
       const channel = supabase
         .channel(`voice-participants:${currentChannel.id}`)
@@ -1099,7 +1350,7 @@ export function useDiscord() {
           },
           (payload) => {
             fetchVoiceParticipants();
-            
+
             // Update speaking users
             if (payload.eventType === "UPDATE") {
               const participant = payload.new as DiscordVoiceParticipant;
@@ -1116,17 +1367,19 @@ export function useDiscord() {
           }
         )
         .subscribe();
-      
+
       return () => {
         supabase.removeChannel(channel);
       };
     }
   }, [currentChannel, fetchVoiceParticipants]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount AND on tab close / page unload
   useEffect(() => {
-    return () => {
+    const cleanupVoice = () => {
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
       localStream?.getTracks().forEach(track => track.stop());
+      screenStreamRef.current?.getTracks().forEach(track => track.stop());
       peerConnections.current.forEach(pc => pc.close());
       if (signalingChannel.current) {
         supabase.removeChannel(signalingChannel.current);
@@ -1135,7 +1388,58 @@ export function useDiscord() {
         audioContext.current.close();
       }
     };
-  }, []);
+
+    // Use sendBeacon for reliable cleanup on tab close
+    const handleBeforeUnload = () => {
+      cleanupVoice();
+      // Best-effort DB cleanup via sendBeacon (works during page unload)
+      if (user) {
+        const url = `${(supabase as any).supabaseUrl}/rest/v1/discord_voice_participants?user_id=eq.${user.id}`;
+        const apiKey = (supabase as any).supabaseKey;
+        if (url && apiKey) {
+          // sendBeacon doesn't support DELETE, so we use fetch with keepalive
+          try {
+            fetch(url, {
+              method: "DELETE",
+              headers: {
+                "apikey": apiKey,
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+              },
+              keepalive: true,
+            }).catch(() => { });
+          } catch { }
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      cleanupVoice();
+    };
+  }, [user]);
+
+  // Wrapper for setCurrentChannel to handle voice channel logic
+  const handleSetCurrentChannel = async (channel: DiscordChannel | null) => {
+    // If clicking the same channel, do nothing
+    if (currentChannel?.id === channel?.id) return;
+
+    // Logic for Voice Channels
+    const isLeavingVoice = inVoiceChannel && currentChannel?.type === 'voice';
+    const isJoiningVoice = channel?.type === 'voice';
+
+    if (isLeavingVoice) {
+      await leaveVoiceChannel();
+    }
+
+    setInternalCurrentChannel(channel);
+
+    if (isJoiningVoice && channel) {
+      await joinVoiceChannel(channel);
+    }
+  };
 
   return {
     // Server state
@@ -1144,37 +1448,42 @@ export function useDiscord() {
     members,
     channels,
     setCurrentServer,
-    
+
     // Channel state
     currentChannel,
-    setCurrentChannel,
+    setCurrentChannel: handleSetCurrentChannel,
     messages,
     voiceParticipants,
-    
+    allVoiceParticipants,
+    typingUsers,
+
     // Voice state
     localStream,
     remoteStreams,
     isAudioEnabled,
     isVideoEnabled,
     isScreenSharing,
+    isDeafened,
     isSpeaking,
     speakingUsers,
     inVoiceChannel,
-    
+
     // Actions
     createServer,
+    deleteServer,
+    leaveServer,
     createChannel,
     deleteChannel,
     sendMessage,
+    sendTypingIndicator,
     inviteUser,
     joinVoiceChannel,
     leaveVoiceChannel,
     toggleAudio,
     toggleVideo,
+    toggleDeafen,
     startScreenShare,
     stopScreenShare,
     fetchServers,
-    
-    loading,
   };
 }

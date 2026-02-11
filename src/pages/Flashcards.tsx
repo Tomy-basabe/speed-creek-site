@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { 
-  Layers, Plus, Sparkles, GraduationCap, 
+import {
+  Layers, Plus, Sparkles, GraduationCap,
   BookOpen, Zap, Trash2, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -82,7 +82,7 @@ export default function Flashcards() {
       .from("subjects")
       .select("*")
       .order("año", { ascending: true });
-    
+
     if (!error && data) {
       setSubjects(data);
     }
@@ -96,7 +96,7 @@ export default function Flashcards() {
       .select("*, subjects(nombre, codigo, año)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
-    
+
     if (!error && data) {
       const mapped = data.map((d: any) => ({ ...d, subject: d.subjects }));
       setDecks(mapped);
@@ -110,7 +110,7 @@ export default function Flashcards() {
       .select("*")
       .eq("deck_id", deckId)
       .order("created_at", { ascending: true });
-    
+
     if (!error && data) {
       setCards(data);
       return data;
@@ -160,14 +160,14 @@ export default function Flashcards() {
       setNewCardQuestion("");
       setNewCardAnswer("");
       setShowNewCardModal(false);
-      
+
       // Update deck card count
       const updatedCards = await fetchCards(selectedDeck.id);
       await supabase
         .from("flashcard_decks")
         .update({ total_cards: updatedCards.length })
         .eq("id", selectedDeck.id);
-      
+
       fetchDecks();
       // Verificar logros después de crear una tarjeta
       checkAndUnlockAchievements();
@@ -176,11 +176,11 @@ export default function Flashcards() {
 
   const handleCardResult = useCallback(async (correct: boolean) => {
     if (!cards.length) return;
-    
+
     // Find the card that was just answered (we track this via correctCount + incorrectCount)
     const answeredIndex = correctCount + (cards.length - correctCount - (cards.length - 1));
     const card = cards[answeredIndex] || cards[0];
-    
+
     if (correct) {
       setCorrectCount(prev => prev + 1);
     }
@@ -208,6 +208,7 @@ export default function Flashcards() {
           duracion_segundos: studyTime,
           tipo: "flashcard",
           completada: true,
+          fecha: new Date().toISOString().split('T')[0],
         });
       // Verificar logros después de completar estudio de flashcards
       checkAndUnlockAchievements();
@@ -313,6 +314,7 @@ export default function Flashcards() {
           duracion_segundos: studyTime,
           tipo: "flashcard",
           completada: false,
+          fecha: new Date().toISOString().split('T')[0],
         });
       toast.success("Sesión guardada");
     }
@@ -448,8 +450,8 @@ export default function Flashcards() {
             onClick={() => { setSelectedYear(null); setSelectedSubject(null); }}
             className={cn(
               "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all",
-              !selectedYear 
-                ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background" 
+              !selectedYear
+                ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background"
                 : "bg-secondary hover:bg-secondary/80"
             )}
           >
@@ -461,8 +463,8 @@ export default function Flashcards() {
               onClick={() => { setSelectedYear(year); setSelectedSubject(null); }}
               className={cn(
                 "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all",
-                selectedYear === year 
-                  ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background" 
+                selectedYear === year
+                  ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background"
                   : "bg-secondary hover:bg-secondary/80"
               )}
             >
@@ -557,8 +559,8 @@ export default function Flashcards() {
                     onClick={() => { setSelectedYear(year); setSelectedSubject(null); }}
                     className={cn(
                       "flex-1 py-3 rounded-xl text-sm font-semibold transition-all",
-                      selectedYear === year 
-                        ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background" 
+                      selectedYear === year
+                        ? "bg-gradient-to-r from-neon-cyan to-neon-purple text-background"
                         : "bg-secondary hover:bg-secondary/80"
                     )}
                   >
@@ -670,8 +672,8 @@ export default function Flashcards() {
               </div>
             ) : (
               cards.map((card) => (
-                <div 
-                  key={card.id} 
+                <div
+                  key={card.id}
                   className="p-4 bg-secondary rounded-xl border border-border group hover:border-neon-cyan/30 transition-colors"
                 >
                   <div className="flex justify-between items-start gap-3">

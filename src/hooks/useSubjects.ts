@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -96,53 +96,60 @@ export function useSubjects() {
   const [userStatuses, setUserStatuses] = useState<UserSubjectStatus[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [loading, setLoading] = useState(true);
+  const isInitialLoad = useRef(true);
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       
-      // Fetch subjects
-      const { data: subjectsData, error: subjectsError } = await supabase
-        .from("subjects")
-        .select("*")
-        .order("año", { ascending: true })
-        .order("numero_materia", { ascending: true });
+      // Run all 3 queries in parallel
+      const [subjectsResult, statusResult, depsResult] = await Promise.all([
+        supabase
+          .from("subjects")
+          .select("*")
+          .order("año", { ascending: true })
+          .order("numero_materia", { ascending: true }),
+        supabase
+          .from("user_subject_status")
+          .select("*"),
+        supabase
+          .from("subject_dependencies")
+          .select("*"),
+      ]);
 
-      if (subjectsError) throw subjectsError;
+      if (subjectsResult.error) throw subjectsResult.error;
+      if (statusResult.error) throw statusResult.error;
+      if (depsResult.error) throw depsResult.error;
 
-      // Fetch user statuses
-      const { data: statusData, error: statusError } = await supabase
-        .from("user_subject_status")
-        .select("*");
-
-      if (statusError) throw statusError;
-
-      // Fetch dependencies
-      const { data: depsData, error: depsError } = await supabase
-        .from("subject_dependencies")
-        .select("*");
-
-      if (depsError) throw depsError;
-
-      setSubjects(subjectsData || []);
-      setUserStatuses((statusData || []).map(s => ({
+      setSubjects(subjectsResult.data || []);
+      setUserStatuses((statusResult.data || []).map(s => ({
         ...s,
         estado: s.estado as SubjectStatus,
       })));
-      setDependencies(depsData || []);
+      setDependencies(depsResult.data || []);
     } catch (error) {
       console.error("Error fetching subjects:", error);
       toast.error("Error al cargar las materias");
     } finally {
       setLoading(false);
+      isInitialLoad.current = false;
     }
   }, []);
 
   useEffect(() => {
     if (user) {
-      fetchData();
+      fetchData(true);
     }
   }, [user, fetchData]);
+
+  // Debounced refetch for realtime — avoids cascade re-renders
+  const debouncedRefetch = useCallback(() => {
+    if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    refetchTimer.current = setTimeout(() => {
+      fetchData(false); // Don't show loading spinner on realtime updates
+    }, 300);
+  }, [fetchData]);
 
   // Realtime subscription for user_subject_status changes
   useRealtimeSubscription({
@@ -150,68 +157,97 @@ export function useSubjects() {
     filter: user ? `user_id=eq.${user.id}` : undefined,
     onChange: useCallback(() => {
       console.log("📡 Realtime: user_subject_status changed, refetching...");
-      fetchData();
-    }, [fetchData]),
+      debouncedRefetch();
+    }, [debouncedRefetch]),
     enabled: !!user,
   });
 
+  // Pre-build lookup maps for O(1) access instead of repeated .find() calls
+  const userStatusMap = useMemo(() => {
+    const map = new Map<string, UserSubjectStatus>();
+    for (const s of userStatuses) {
+      map.set(s.subject_id, s);
+    }
+    return map;
+  }, [userStatuses]);
+
+  const dependenciesBySubject = useMemo(() => {
+    const map = new Map<string, Dependency[]>();
+    for (const d of dependencies) {
+      const existing = map.get(d.subject_id);
+      if (existing) {
+        existing.push(d);
+      } else {
+        map.set(d.subject_id, [d]);
+      }
+    }
+    return map;
+  }, [dependencies]);
+
+  const subjectMap = useMemo(() => {
+    const map = new Map<string, Subject>();
+    for (const s of subjects) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [subjects]);
+
   const getSubjectStatus = useCallback((subjectId: string): SubjectStatus => {
-    const userStatus = userStatuses.find(s => s.subject_id === subjectId);
+    const userStatus = userStatusMap.get(subjectId);
     if (userStatus) {
       return userStatus.estado;
     }
     
-    // Check if subject is unlocked based on dependencies
-    const deps = dependencies.filter(d => d.subject_id === subjectId);
+    const deps = dependenciesBySubject.get(subjectId) || [];
     if (deps.length === 0) {
-      return "cursable"; // No dependencies = can be taken
+      return "cursable";
     }
 
-    // Check all dependencies
     const canTake = deps.every(dep => {
       if (dep.requiere_aprobada) {
-        const reqStatus = userStatuses.find(s => s.subject_id === dep.requiere_aprobada);
+        const reqStatus = userStatusMap.get(dep.requiere_aprobada);
         return reqStatus?.estado === "aprobada";
       }
       if (dep.requiere_regular) {
-        const reqStatus = userStatuses.find(s => s.subject_id === dep.requiere_regular);
+        const reqStatus = userStatusMap.get(dep.requiere_regular);
         return reqStatus?.estado === "aprobada" || reqStatus?.estado === "regular";
       }
       return true;
     });
 
     return canTake ? "cursable" : "bloqueada";
-  }, [userStatuses, dependencies]);
+  }, [userStatusMap, dependenciesBySubject]);
 
   const getMissingRequirements = useCallback((subjectId: string): string[] => {
-    const deps = dependencies.filter(d => d.subject_id === subjectId);
+    const deps = dependenciesBySubject.get(subjectId) || [];
     const missing: string[] = [];
 
-    deps.forEach(dep => {
+    for (const dep of deps) {
       if (dep.requiere_aprobada) {
-        const reqStatus = userStatuses.find(s => s.subject_id === dep.requiere_aprobada);
+        const reqStatus = userStatusMap.get(dep.requiere_aprobada);
         if (reqStatus?.estado !== "aprobada") {
-          const subject = subjects.find(s => s.id === dep.requiere_aprobada);
+          const subject = subjectMap.get(dep.requiere_aprobada);
           if (subject) missing.push(`${subject.numero_materia} aprobada`);
         }
       }
       if (dep.requiere_regular) {
-        const reqStatus = userStatuses.find(s => s.subject_id === dep.requiere_regular);
+        const reqStatus = userStatusMap.get(dep.requiere_regular);
         if (reqStatus?.estado !== "aprobada" && reqStatus?.estado !== "regular") {
-          const subject = subjects.find(s => s.id === dep.requiere_regular);
+          const subject = subjectMap.get(dep.requiere_regular);
           if (subject) missing.push(`${subject.numero_materia} regular`);
         }
       }
-    });
+    }
 
     return missing;
-  }, [dependencies, userStatuses, subjects]);
+  }, [dependenciesBySubject, userStatusMap, subjectMap]);
 
-  const getSubjectsWithStatus = useCallback((): SubjectWithStatus[] => {
+  // Memoize the full computed subjects list — only recalculates when data actually changes
+  const subjectsWithStatus = useMemo((): SubjectWithStatus[] => {
     return subjects.map(subject => {
-      const userStatus = userStatuses.find(s => s.subject_id === subject.id);
+      const userStatus = userStatusMap.get(subject.id);
       const status = getSubjectStatus(subject.id);
-      const subjectDeps = dependencies.filter(d => d.subject_id === subject.id);
+      const subjectDeps = dependenciesBySubject.get(subject.id) || [];
       
       return {
         ...subject,
@@ -232,7 +268,7 @@ export function useSubjects() {
         },
       };
     });
-  }, [subjects, userStatuses, dependencies, getSubjectStatus, getMissingRequirements]);
+  }, [subjects, userStatusMap, dependenciesBySubject, getSubjectStatus, getMissingRequirements]);
 
   const updateSubjectStatus = async (
     subjectId: string, 
@@ -315,7 +351,7 @@ export function useSubjects() {
         }
       }
 
-      await fetchData();
+      await fetchData(false);
       toast.success("Estado actualizado correctamente");
       
       // Verificar logros después de actualizar estado de materia
@@ -378,7 +414,7 @@ export function useSubjects() {
         if (aprError) throw aprError;
       }
 
-      await fetchData();
+      await fetchData(false);
       toast.success("Materia creada correctamente");
       return newSubject;
     } catch (error) {
@@ -421,7 +457,7 @@ export function useSubjects() {
         if (insertError) throw insertError;
       }
 
-      await fetchData();
+      await fetchData(false);
       toast.success("Correlativas actualizadas correctamente");
     } catch (error) {
       console.error("Error updating dependencies:", error);
@@ -452,7 +488,7 @@ export function useSubjects() {
 
       if (error) throw error;
 
-      await fetchData();
+      await fetchData(false);
       toast.success("Materia eliminada correctamente");
     } catch (error) {
       console.error("Error deleting subject:", error);
@@ -502,7 +538,7 @@ export function useSubjects() {
         if (error) throw error;
       }
 
-      await fetchData();
+      await fetchData(false);
       // No toast on success to avoid spamming during auto-save
     } catch (error) {
       console.error("Error updating partial grades:", error);
@@ -551,7 +587,7 @@ export function useSubjects() {
 
       if (error) throw error;
 
-      await fetchData();
+      await fetchData(false);
       toast.success(`Se inicializaron ${statusesToCreate.length} materias como aprobadas`);
     } catch (error) {
       console.error("Error initializing statuses:", error);
@@ -560,7 +596,7 @@ export function useSubjects() {
   };
 
   return {
-    subjects: getSubjectsWithStatus(),
+    subjects: subjectsWithStatus,
     rawSubjects: subjects,
     dependencies,
     loading,
@@ -574,3 +610,4 @@ export function useSubjects() {
     getYears,
   };
 }
+

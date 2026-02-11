@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 import { Crown, Sparkles, Star } from "lucide-react";
 
@@ -11,7 +12,14 @@ interface LegendarySubjectCardProps {
   compact?: boolean;
 }
 
-export function LegendarySubjectCard({
+// Static particles array — avoids re-creation on every render
+const particles = [
+  { left: "20%", delay: "0s" },
+  { left: "50%", delay: "1s" },
+  { left: "80%", delay: "2s" },
+];
+
+export const LegendarySubjectCard = memo(function LegendarySubjectCard({
   nombre,
   codigo,
   nota,
@@ -20,12 +28,6 @@ export function LegendarySubjectCard({
   onClick,
   compact = false,
 }: LegendarySubjectCardProps) {
-  // Generate random positions for particles
-  const particles = Array.from({ length: 6 }, (_, i) => ({
-    left: `${15 + i * 15}%`,
-    delay: `${i * 0.5}s`,
-  }));
-
   return (
     <button
       onClick={onClick}
@@ -89,7 +91,7 @@ export function LegendarySubjectCard({
             )}
             <span className="text-xs text-neon-gold/70 font-medium">{codigo}</span>
           </div>
-          
+
           {/* Epic grade display */}
           {nota !== undefined && nota !== null && (
             <div className="relative">
@@ -109,4 +111,5 @@ export function LegendarySubjectCard({
       </div>
     </button>
   );
-}
+});
+

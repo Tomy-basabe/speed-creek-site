@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 import { BookOpen, Lock, Clock, RotateCcw } from "lucide-react";
 import { LegendarySubjectCard } from "@/components/subjects/LegendarySubjectCard";
@@ -47,7 +48,7 @@ const statusConfig = {
   },
 };
 
-export function SubjectCard({
+export const SubjectCard = memo(function SubjectCard({
   nombre,
   codigo,
   status,
@@ -132,7 +133,7 @@ export function SubjectCard({
           </p>
           <div className="flex flex-wrap gap-1">
             {requisitos_faltantes.slice(0, 3).map((req, idx) => (
-              <span 
+              <span
                 key={idx}
                 className="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground"
               >
@@ -149,4 +150,5 @@ export function SubjectCard({
       )}
     </button>
   );
-}
+});
+

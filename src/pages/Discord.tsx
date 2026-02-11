@@ -1,156 +1,165 @@
-import { useState } from "react";
-import { useDiscord } from "@/hooks/useDiscord";
-import { useAuth } from "@/contexts/AuthContext";
+import { useDiscordVoice } from "@/contexts/DiscordVoiceContext";
 import { DiscordServerList } from "@/components/discord/DiscordServerList";
 import { DiscordChannelSidebar } from "@/components/discord/DiscordChannelSidebar";
 import { DiscordTextChannel } from "@/components/discord/DiscordTextChannel";
 import { DiscordVoiceChannel } from "@/components/discord/DiscordVoiceChannel";
-import { DiscordVoiceBar } from "@/components/discord/DiscordVoiceBar";
-import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2 } from "lucide-react";
 
 export default function Discord() {
-  const discord = useDiscord();
-  const { user } = useAuth();
-  const [showMembers, setShowMembers] = useState(true);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const discord = useDiscordVoice();
+  const {
+    servers,
+    currentServer,
+    channels,
+    currentChannel,
+    members,
+    voiceParticipants,
+    allVoiceParticipants,
+    messages,
+    localStream,
+    remoteStreams,
+    isAudioEnabled,
+    isVideoEnabled,
+    isDeafened,
+    isScreenSharing,
+    isSpeaking,
+    speakingUsers,
+    typingUsers,
+    inVoiceChannel,
+    setCurrentServer,
+    createServer,
+    deleteServer,
+    leaveServer,
+    createChannel,
+    deleteChannel,
+    setCurrentChannel,
+    sendMessage,
+    sendTypingIndicator,
+    inviteUser,
+    joinVoiceChannel,
+    leaveVoiceChannel,
+    toggleAudio,
+    toggleVideo,
+    toggleDeafen,
+    startScreenShare,
+    stopScreenShare
+  } = discord;
+
+  if (servers.length === 0) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-background text-primary">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="h-screen flex bg-[#313338] overflow-hidden">
-      {/* Server list - Discord style vertical bar */}
+    <div className="h-screen flex bg-background overflow-hidden relative selection:bg-primary/30 text-foreground font-sans">
+      {/* Background Ambience */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-primary/5 via-background to-background pointer-events-none" />
+
       <DiscordServerList
-        servers={discord.servers}
-        currentServer={discord.currentServer}
-        onSelectServer={discord.setCurrentServer}
-        onCreateServer={discord.createServer}
+        servers={servers}
+        currentServer={currentServer}
+        onSelectServer={setCurrentServer}
+        onCreateServer={createServer}
+        onDeleteServer={deleteServer}
+        onLeaveServer={leaveServer}
       />
 
-      {/* Channel sidebar - collapsible */}
-      {discord.currentServer && (
-        <div className={cn(
-          "transition-all duration-300 relative",
-          sidebarCollapsed ? "w-0 overflow-hidden" : "w-60"
-        )}>
+      {currentServer ? (
+        <div className="flex-1 flex overflow-hidden">
           <DiscordChannelSidebar
-            server={discord.currentServer}
-            channels={discord.channels}
-            currentChannel={discord.currentChannel}
-            members={discord.members}
-            voiceParticipants={discord.voiceParticipants}
-            speakingUsers={discord.speakingUsers}
-            onSelectChannel={(channel) => {
-              if (channel.type === "voice") {
-                if (discord.inVoiceChannel && discord.currentChannel?.id === channel.id) {
-                  // Already in this channel
-                  return;
-                }
-                if (discord.inVoiceChannel) {
-                  discord.leaveVoiceChannel();
-                }
-                discord.joinVoiceChannel(channel);
-              } else {
-                discord.setCurrentChannel(channel);
-              }
-            }}
-            onCreateChannel={discord.createChannel}
-            onDeleteChannel={discord.deleteChannel}
-            onInviteUser={discord.inviteUser}
-            inVoiceChannel={discord.inVoiceChannel}
-            currentVoiceChannel={discord.inVoiceChannel ? discord.currentChannel : null}
+            server={currentServer}
+            channels={channels}
+            currentChannel={currentChannel}
+            members={members}
+            voiceParticipants={voiceParticipants}
+            allVoiceParticipants={allVoiceParticipants}
+            speakingUsers={speakingUsers}
+            onSelectChannel={setCurrentChannel}
+            onCreateChannel={createChannel}
+            onDeleteChannel={deleteChannel}
+            onInviteUser={inviteUser}
+            inVoiceChannel={inVoiceChannel}
+            currentVoiceChannel={inVoiceChannel && currentChannel?.type === 'voice' ? currentChannel : null}
+            isAudioEnabled={isAudioEnabled}
+            isVideoEnabled={isVideoEnabled}
+            isDeafened={isDeafened}
+            isSpeaking={isSpeaking}
+            onToggleAudio={toggleAudio}
+            onToggleDeafen={toggleDeafen}
+            onLeaveVoice={leaveVoiceChannel}
           />
+
+          <div className="flex-1 flex flex-col bg-background relative overflow-hidden">
+            {/* Main Content Area Background Pattern */}
+            <div className="absolute inset-0 opacity-[0.02] pointer-events-none"
+              style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)', backgroundSize: '20px 20px' }}>
+            </div>
+
+            {currentChannel?.type === "text" ? (
+              <DiscordTextChannel
+                channel={currentChannel}
+                messages={messages}
+                currentUser={discord.members.find(m => m.user_id === discord.members[0]?.user_id) || { id: "me", role: "member", user_id: "me", server_id: "", joined_at: "" }}
+                members={members}
+                onSendMessage={sendMessage}
+                onTyping={sendTypingIndicator}
+                typingUsers={typingUsers}
+              />
+            ) : currentChannel?.type === "voice" ? (
+              <DiscordVoiceChannel
+                channel={currentChannel}
+                localStream={localStream}
+                remoteStreams={remoteStreams}
+                voiceParticipants={voiceParticipants}
+                isAudioEnabled={isAudioEnabled}
+                isVideoEnabled={isVideoEnabled}
+                isScreenSharing={isScreenSharing}
+                isDeafened={isDeafened}
+                onToggleAudio={toggleAudio}
+                onToggleVideo={toggleVideo}
+                onToggleScreenShare={isScreenSharing ? stopScreenShare : startScreenShare}
+                onLeaveChannel={leaveVoiceChannel}
+                speakingUsers={speakingUsers}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground flex-col gap-4">
+                <div className="w-24 h-24 rounded-full bg-muted/20 flex items-center justify-center animate-pulse">
+                  <div className="w-16 h-16 rounded-full bg-muted/30" />
+                </div>
+                <p>Selecciona un canal para comenzar</p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center bg-background text-foreground p-8 text-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+          <div className="relative z-10 max-w-md">
+            <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(var(--primary),0.3)] animate-float">
+              <img src="/discord-icon.svg" alt="Discord" className="w-12 h-12 opacity-80" onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }} />
+            </div>
+            <h2 className="text-3xl font-bold font-orbitron mb-4 text-primary">Bienvenido a tu Espacio</h2>
+            <p className="text-muted-foreground mb-8 text-lg">
+              Selecciona un servidor de la izquierda o crea uno nuevo para empezar a chatear y conectar con tu comunidad.
+            </p>
+            <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground/60">
+              <div className="p-4 rounded-lg bg-card/50 border border-border/50">
+                <span className="block text-primary font-bold mb-1">Voz y Video</span>
+                Conéctate en tiempo real
+              </div>
+              <div className="p-4 rounded-lg bg-card/50 border border-border/50">
+                <span className="block text-primary font-bold mb-1">Comunidad</span>
+                Organiza tus canales
+              </div>
+            </div>
+          </div>
         </div>
       )}
-
-      {/* Sidebar toggle button */}
-      {discord.currentServer && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className={cn(
-                "absolute z-50 bg-[#2b2d31] hover:bg-[#35373c] text-[#b5bac1] hover:text-white border border-[#1f2023] rounded-full w-6 h-6 transition-all duration-300",
-                sidebarCollapsed ? "left-[72px]" : "left-[calc(72px+240px-12px)]",
-                "top-4"
-              )}
-            >
-              {sidebarCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronLeft className="w-4 h-4" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {sidebarCollapsed ? "Mostrar canales" : "Ocultar canales"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {discord.currentChannel ? (
-          discord.currentChannel.type === "text" ? (
-            <DiscordTextChannel
-              channel={discord.currentChannel}
-              messages={discord.messages}
-              onSendMessage={discord.sendMessage}
-              showMembers={showMembers}
-              onToggleMembers={() => setShowMembers(!showMembers)}
-              members={discord.members}
-            />
-          ) : (
-            <DiscordVoiceChannel
-              channel={discord.currentChannel}
-              participants={discord.voiceParticipants}
-              localStream={discord.localStream}
-              remoteStreams={discord.remoteStreams}
-              speakingUsers={discord.speakingUsers}
-              isVideoEnabled={discord.isVideoEnabled}
-              isAudioEnabled={discord.isAudioEnabled}
-              isScreenSharing={discord.isScreenSharing}
-              localUserId={user?.id ?? null}
-            />
-          )
-        ) : discord.currentServer ? (
-          <div className="flex-1 flex items-center justify-center text-[#949ba4]">
-            <div className="text-center">
-              <h2 className="text-xl font-semibold mb-2">¡Bienvenido a {discord.currentServer.name}!</h2>
-              <p>Selecciona un canal para comenzar</p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-[#949ba4]">
-            <div className="text-center">
-              <h2 className="text-2xl font-semibold mb-2">Discord</h2>
-              <p>Selecciona o crea un servidor para comenzar</p>
-            </div>
-          </div>
-        )}
-
-        {/* Voice control bar - shows when in voice channel */}
-        {discord.inVoiceChannel && (
-          <DiscordVoiceBar
-            channel={discord.currentChannel}
-            isAudioEnabled={discord.isAudioEnabled}
-            isVideoEnabled={discord.isVideoEnabled}
-            isScreenSharing={discord.isScreenSharing}
-            onToggleAudio={discord.toggleAudio}
-            onToggleVideo={discord.toggleVideo}
-            onToggleScreenShare={() => {
-              if (discord.isScreenSharing) {
-                discord.stopScreenShare();
-              } else {
-                discord.startScreenShare();
-              }
-            }}
-            onLeave={discord.leaveVoiceChannel}
-          />
-        )}
-      </div>
     </div>
   );
 }
