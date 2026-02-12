@@ -20,6 +20,22 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
+    // Free OpenRelay TURN servers for testing
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
 };
 
@@ -234,7 +250,7 @@ export function useWebRTC(roomId: string | null) {
     if (!stream) return;
 
     const videoTracks = stream.getVideoTracks();
-    
+
     if (isVideoEnabled) {
       // Disable video
       videoTracks.forEach((track) => {
@@ -256,7 +272,7 @@ export function useWebRTC(roomId: string | null) {
           });
           const newVideoTrack = newStream.getVideoTracks()[0];
           stream.addTrack(newVideoTrack);
-          
+
           // Update peer connections with new track
           peerConnections.current.forEach(({ connection }) => {
             const sender = connection.getSenders().find((s) => s.track?.kind === "video");
@@ -266,7 +282,7 @@ export function useWebRTC(roomId: string | null) {
               connection.addTrack(newVideoTrack, stream);
             }
           });
-          
+
           setLocalStream(stream);
           setDisplayStream(stream);
           setIsVideoEnabled(true);

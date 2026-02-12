@@ -67,6 +67,22 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    // Free OpenRelay TURN servers for testing
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
 };
 
@@ -108,6 +124,8 @@ export function useDiscord() {
   const screenStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null); // Keep reference for signaling handlers
   const typingTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // Buffer for ICE candidates that arrive before remote description
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const typingChannel = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // Perfect Negotiation state (prevents offer glare)
@@ -734,6 +752,7 @@ export function useDiscord() {
     peerConnections.current.clear();
     negotiationStateRef.current.clear();
     videoTransceiversRef.current.clear();
+    pendingCandidatesRef.current.clear();
 
     if (signalingChannel.current) {
       await supabase.removeChannel(signalingChannel.current);
@@ -910,14 +929,20 @@ export function useDiscord() {
     pc.onconnectionstatechange = () => {
       console.log("[Discord] Connection state with", peerId, ":", pc.connectionState);
       if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-        // Clean up failed connection
-        peerConnections.current.delete(peerId);
-        videoTransceiversRef.current.delete(peerId);
-        setRemoteStreams((prev) => {
-          const updated = new Map(prev);
-          updated.delete(peerId);
-          return updated;
-        });
+        // Attempt to recover from failed state if we are still connected to signaling
+        if (pc.connectionState === "failed" && signalingChannel.current) {
+          console.log("[Discord] Connection failed, attempting restart ICE for:", peerId);
+          pc.restartIce();
+        } else {
+          // Clean up failed connection
+          peerConnections.current.delete(peerId);
+          videoTransceiversRef.current.delete(peerId);
+          setRemoteStreams((prev) => {
+            const updated = new Map(prev);
+            updated.delete(peerId);
+            return updated;
+          });
+        }
       }
     };
 
@@ -995,6 +1020,21 @@ export function useDiscord() {
           data: answer,
         },
       });
+
+      // Process any pending candidates
+      const pending = pendingCandidatesRef.current.get(fromId);
+      if (pending) {
+        console.log(`[Discord] Processing ${pending.length} buffered candidates for ${fromId}`);
+        for (const candidate of pending) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error("Error adding buffered candidate:", e);
+          }
+        }
+        pendingCandidatesRef.current.delete(fromId);
+      }
+
     } catch (error) {
       console.error("Error handling offer:", error);
     }
@@ -1004,13 +1044,39 @@ export function useDiscord() {
     const pc = peerConnections.current.get(fromId);
     if (pc) {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+      // Process any pending candidates
+      const pending = pendingCandidatesRef.current.get(fromId);
+      if (pending) {
+        console.log(`[Discord] Processing ${pending.length} buffered candidates for ${fromId}`);
+        for (const candidate of pending) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error("Error adding buffered candidate:", e);
+          }
+        }
+        pendingCandidatesRef.current.delete(fromId);
+      }
     }
   };
 
   const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
     const pc = peerConnections.current.get(fromId);
-    if (pc) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    if (!pc) return;
+
+    if (!pc.remoteDescription) {
+      // Remote description not set yet, buffer candidate
+      console.log(`[Discord] Buffering ICE candidate for ${fromId} (no remote description)`);
+      const current = pendingCandidatesRef.current.get(fromId) || [];
+      current.push(candidate);
+      pendingCandidatesRef.current.set(fromId, current);
+    } else {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error("Error adding ICE candidate:", e);
+      }
     }
   };
 
